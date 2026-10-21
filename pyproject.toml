@@ -24,3 +24,6 @@ packages = ["src/elixir_echo"]
 addopts = "-ra"
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+  "firstlight: requires an explicitly configured read-only FirstLight checkout",
+]
