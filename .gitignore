@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# Build outputs
+build/
+dist/
+*.egg-info/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Local data and generated artifacts
+data/
+runs/
+artifacts/
+checkpoints/
+models/
+*.pt
+*.pth
+*.ckpt
+*.parquet
+*.log
+
+# Game/runtime binaries and resources
+*.apk
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

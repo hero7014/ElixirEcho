@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "elixir-echo"
+version = "0.1.0"
+description = "Learning human play, one elixir decision at a time."
+requires-python = ">=3.12"
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=9.0",
+]
+
+[project.scripts]
+elixir-echo = "elixir_echo.provenance:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/elixir_echo"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
+pythonpath = ["src"]

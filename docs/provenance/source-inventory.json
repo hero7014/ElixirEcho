@@ -1,0 +1,633 @@
+{
+  "aggregate_sha256": "6fa10dd31cdbf03139c3df7560010837257f9bf1874cdc8ddbe97143fc7f7793",
+  "classification_counts": {
+    "documentation": 12,
+    "source": 55,
+    "test": 35
+  },
+  "entries": [
+    {
+      "classification": "source",
+      "path": "adb/check_device.py",
+      "sha256": "cda0e159a3a1fa9d34d22281e7687f682563a8ea9dbb3caae7e795952b9caf0c",
+      "size": 307
+    },
+    {
+      "classification": "source",
+      "path": "adb/list_process.py",
+      "sha256": "9853d5cf4eaea0c2d874cde074bc8b3ea03bda500db84cabef3f90f55ba881e4",
+      "size": 249
+    },
+    {
+      "classification": "documentation",
+      "path": "docs/2026-10-10-resident-batch-semantic-benchmark.md",
+      "sha256": "535f003705d3e1fcee4067a6ce5ef4e03596b7092110a9b307b9340417cbef1b",
+      "size": 2137
+    },
+    {
+      "classification": "documentation",
+      "path": "docs/ObservationV1_field_audit.md",
+      "sha256": "594aad813f349d4708a2abe17e60d23f2cc2941a09f7d0cf9e43bfd71016b167",
+      "size": 30961
+    },
+    {
+      "classification": "documentation",
+      "path": "docs/SemanticFrameV1_observation_profiles.md",
+      "sha256": "0985fc51dd8fc4fce86bfecb253595ee1dfd4f0c090aee0bd523fb244243de8d",
+      "size": 26815
+    },
+    {
+      "classification": "documentation",
+      "path": "docs/superpowers/plans/2026-09-28-firstlight-semantic-frame-readonly-adapter.md",
+      "sha256": "14b3246b94c2ca6c81e65e0259ba60c85cd63650c8d1b2d8c2c680e3e8262476",
+      "size": 14571
+    },
+    {
+      "classification": "documentation",
+      "path": "docs/superpowers/plans/2026-09-29-firstlight-100-replay-cache-validation.md",
+      "sha256": "3a0bbbc3ae4ac250dee2aa7dc3dbfb6c00746fda7ee089b153ef3124f8d21457",
+      "size": 4351
+    },
+    {
+      "classification": "documentation",
+      "path": "docs/superpowers/plans/2026-10-01-semantic-frame-v4-tiny-overfit.md",
+      "sha256": "9fb413c8506b3983e262308d956df9425fb82e5ab9ef1d1dbc5cc932338deee7",
+      "size": 4284
+    },
+    {
+      "classification": "documentation",
+      "path": "docs/superpowers/plans/2026-10-02-full-episode-recurrent-v4-checkpoint-v1.md",
+      "sha256": "c01bd0de17139979455dd6031bf11cdfa553036ba0ab23e5bdb7b3a23738d8c8",
+      "size": 30857
+    },
+    {
+      "classification": "documentation",
+      "path": "docs/superpowers/plans/2026-10-10-resident-batch-semantic-benchmark.md",
+      "sha256": "8ccd2cd830659984ae9c5347d67dc936be611382b35d9748747e41a2cc846b22",
+      "size": 4212
+    },
+    {
+      "classification": "documentation",
+      "path": "docs/superpowers/plans/2026-10-15-sharded-batched-recurrent-v4-training.md",
+      "sha256": "d6d5d0c2ed1a02340a058ec1b7e8fbbe1ee70c45b04c1263b19551fb4887e67b",
+      "size": 25180
+    },
+    {
+      "classification": "documentation",
+      "path": "docs/superpowers/specs/2026-10-01-semantic-frame-v4-tiny-overfit.md",
+      "sha256": "23fb1549c01743d655ead46f49bc75be36a7b692494167df7af72fd93561eda8",
+      "size": 1758
+    },
+    {
+      "classification": "documentation",
+      "path": "docs/superpowers/specs/2026-10-02-full-episode-recurrent-v4-checkpoint-v1-design.md",
+      "sha256": "cff189f809d74c4547d0fdc6ff57f0d2fbe192b4199989270b61a7cfd9353d7a",
+      "size": 20358
+    },
+    {
+      "classification": "documentation",
+      "path": "docs/superpowers/specs/2026-10-15-sharded-batched-recurrent-v4-training-design.md",
+      "sha256": "06bc905015984f429bf1e8b03be0195031f5aa25fcf36a8ca03520d3c57abe09",
+      "size": 16418
+    },
+    {
+      "classification": "source",
+      "path": "src/semantic_frame/__init__.py",
+      "sha256": "05c2258f63e7fa341e32d3ccce91cd03f5fbceb73bf3643b7a2c48ba56e4c3c0",
+      "size": 168
+    },
+    {
+      "classification": "source",
+      "path": "src/semantic_frame/cache_record.py",
+      "sha256": "e0a598e1bcadb6d5b013835292cfc9b37ed9c05a25cd74e7dfb5e3f49c17b47d",
+      "size": 2688
+    },
+    {
+      "classification": "source",
+      "path": "src/semantic_frame/contracts.py",
+      "sha256": "08167c0d12012b6d9c670f426886bd656bd4c4420b6fc9375ca9ef1977ddf6a1",
+      "size": 5462
+    },
+    {
+      "classification": "source",
+      "path": "src/semantic_frame/firstlight_adapter.py",
+      "sha256": "28fce7ea5fc44e7e88b35aa5d560b433d4fda1177494e7b7cec9fba31cab31b1",
+      "size": 16223
+    },
+    {
+      "classification": "source",
+      "path": "src/semantic_frame/firstlight_full_episode.py",
+      "sha256": "9596b510795431ccf5726647e633164c204525f84e663b318b35fe2d9e3fb246",
+      "size": 32040
+    },
+    {
+      "classification": "source",
+      "path": "src/semantic_frame/firstlight_replay_smoke.py",
+      "sha256": "9f8db6e1f1063c16b5068b81f739a2740ed122efa5579b879b7f66a4fe9fa1ec",
+      "size": 18672
+    },
+    {
+      "classification": "source",
+      "path": "src/semantic_frame/full_episode_cache.py",
+      "sha256": "04385ff0c84b5826fc3b0450b840f02bc122d8eb4c993795ff841cd454df7c5f",
+      "size": 21958
+    },
+    {
+      "classification": "source",
+      "path": "src/semantic_frame/profiles.py",
+      "sha256": "3e157fae57f7b47ea7216a784fcf07aaf2889e08795f050357c3db8e01605ccf",
+      "size": 2681
+    },
+    {
+      "classification": "source",
+      "path": "src/semantic_frame/replay_timeline.py",
+      "sha256": "ecf25f94104685b8b2acc6851ccb0af29ef402f8f568715f40e08e91ea0400e7",
+      "size": 19385
+    },
+    {
+      "classification": "source",
+      "path": "src/semantic_frame/resident_batch_benchmark.py",
+      "sha256": "97c5d53246d84d48f45369549c62ccc8e4e6408d8249999a0483d4412152629a",
+      "size": 28632
+    },
+    {
+      "classification": "source",
+      "path": "src/semantic_frame/resident_full_episode.py",
+      "sha256": "c2037a4250ee35606d438a3d8c85f148b57c2c794e197e55e6e13e46d530fcf6",
+      "size": 6140
+    },
+    {
+      "classification": "source",
+      "path": "src/training/__init__.py",
+      "sha256": "e8e4722e44cdb2aad153784f9f974b9fd895db7702cc8cc28b5cc7c9986127a7",
+      "size": 1495
+    },
+    {
+      "classification": "source",
+      "path": "src/training/cache_reader.py",
+      "sha256": "5f8ab98f64c6b790b3dde83ab8fa226edf27b66caa4cdb48f6f08b755005ed86",
+      "size": 4821
+    },
+    {
+      "classification": "source",
+      "path": "src/training/deterministic_tracker.py",
+      "sha256": "5cdd0dd6e129f0c60735a58aa2440f522c56af98712d55361aa6cb67cb114b02",
+      "size": 6123
+    },
+    {
+      "classification": "source",
+      "path": "src/training/firstlight_v4.py",
+      "sha256": "a6ed7c1d7a1560f06f93c8a8d329b75a9e02dbea1f0584ba7d63c748219c355a",
+      "size": 4219
+    },
+    {
+      "classification": "source",
+      "path": "src/training/full_episode_reader.py",
+      "sha256": "2009b8c3f669112c003e45fea3d1032d230fe28f0e4918be99da5c769a61239d",
+      "size": 5072
+    },
+    {
+      "classification": "source",
+      "path": "src/training/history.py",
+      "sha256": "bd6ed864eb9187af0f60d5cac910af4c87599a74d81a1536e011465df3eea709",
+      "size": 6773
+    },
+    {
+      "classification": "source",
+      "path": "src/training/labels.py",
+      "sha256": "ef5871495e9c34347e06c3da27adb6ee02c28f1bd98300b7565f24f7b78020b3",
+      "size": 3840
+    },
+    {
+      "classification": "source",
+      "path": "src/training/recurrent_batching.py",
+      "sha256": "c7946b9e2a2ba5166c8f05a0f26e56758346c0910601243786654b7e41c403b3",
+      "size": 8437
+    },
+    {
+      "classification": "source",
+      "path": "src/training/recurrent_cache.py",
+      "sha256": "a5843e00c29a8eee106ec3117935e1be5d24bca9609e7c35d1ebd8011b50b4d0",
+      "size": 28613
+    },
+    {
+      "classification": "source",
+      "path": "src/training/recurrent_execution.py",
+      "sha256": "17d90c5cee74f4e358dd4a65d55fbde91c368daaa53aa987b9fe3b910c529fba",
+      "size": 4256
+    },
+    {
+      "classification": "source",
+      "path": "src/training/recurrent_il.py",
+      "sha256": "e45716cfbe34ebe49deaf2396720ce6faf27d03ccdcb5621acdbb4a1b288fba7",
+      "size": 29797
+    },
+    {
+      "classification": "source",
+      "path": "src/training/recurrent_labels.py",
+      "sha256": "c54e31b13a5a0bb7e0967685e1f747cc567048bb594ea47d4019a364f2d8e717",
+      "size": 15570
+    },
+    {
+      "classification": "source",
+      "path": "src/training/recurrent_sharded_cache.py",
+      "sha256": "b01af9ba52973f3952254ac2783b25e56bca9043b549fe57cbedc1d84bc0508d",
+      "size": 26072
+    },
+    {
+      "classification": "source",
+      "path": "src/training/recurrent_streaming.py",
+      "sha256": "4e42bfca57a15b7fa51a6297054d30c352a9d5b0010d90a3b82d685844354739",
+      "size": 12011
+    },
+    {
+      "classification": "source",
+      "path": "src/training/stateless_v4.py",
+      "sha256": "03eed2cdb9ecb60e96e80620475e50e8231709f0f5e6360add1dab148e976ab5",
+      "size": 2226
+    },
+    {
+      "classification": "source",
+      "path": "src/training/temporal_v4_input.py",
+      "sha256": "79ddf6f5fd5e410d22252552c4122371d023dfc525a2d8cd16d7cfc641c5b6a2",
+      "size": 9839
+    },
+    {
+      "classification": "source",
+      "path": "src/training/tensorizer_v1.py",
+      "sha256": "a60987cfc18b8d5b09ce80fd00dbd1cf6ec9aadb656ed49b922eff826d4a87c6",
+      "size": 35102
+    },
+    {
+      "classification": "source",
+      "path": "src/training/tiny_overfit.py",
+      "sha256": "d939e4883f92a6f674003b954df5afe24655a7e2aa35248b122493ea722cbfb8",
+      "size": 7605
+    },
+    {
+      "classification": "test",
+      "path": "tests/test_audit_optimized_probe2.py",
+      "sha256": "5ba82bcec9cac16b82038165998fc1d2216a67b46ed0d5143427cc8a4c7ce96e",
+      "size": 1102
+    },
+    {
+      "classification": "test",
+      "path": "tests/test_build_full_episode_cache_resume.py",
+      "sha256": "051f4bb98a469b0532da4efaa0aca619ab9a10ac8bde22e9a39aaeac24331557",
+      "size": 22027
+    },
+    {
+      "classification": "test",
+      "path": "tests/test_cache_record.py",
+      "sha256": "274d9cfd5232d3c00ee46ad4eb6ab2a544ec082016435ca723e2b44023b2e76b",
+      "size": 1885
+    },
+    {
+      "classification": "test",
+      "path": "tests/test_checkpoint_v1_formal_controller.py",
+      "sha256": "1667d1202c1cf517bcc6e40fd71faa78a5327fe53322aa10cd5447d644dbbb6b",
+      "size": 5809
+    },
+    {
+      "classification": "test",
+      "path": "tests/test_checkpoint_v1_probe2_controller.py",
+      "sha256": "ba0a0b57639e7709ce42ff8477ca92bdc041b95c5b3dd63222506f1cbc94b434",
+      "size": 1677
+    },
+    {
+      "classification": "test",
+      "path": "tests/test_compile_recurrent_v4_cache.py",
+      "sha256": "b188431708c2d577d73ae96ca4bded216734a833befa4748aa63aa7a27fbe86a",
+      "size": 32801
+    },
+    {
+      "classification": "test",
+      "path": "tests/test_deterministic_tracker.py",
+      "sha256": "ff8b5682af753eaa28829c46010e0b5fe6eebdf4bf03dbb0b8573eeb7f546c4f",
+      "size": 6304
+    },
+    {
+      "classification": "test",
+      "path": "tests/test_firstlight_adapter.py",
+      "sha256": "dc8c46f6afa104c4ee14cd9fc9594fba0b596748e7cd32d7a82dcd7809d2c849",
+      "size": 10022
+    },
+    {
+      "classification": "test",
+      "path": "tests/test_firstlight_cache_validation.py",
+      "sha256": "10854bacad6d1d5e2c97f3f6ea1c4a25a2adba015bffbd270ef87c36430b23d6",
+      "size": 2961
+    },
+    {
+      "classification": "test",
+      "path": "tests/test_firstlight_contract_integration.py",
+      "sha256": "711f9c9b09ed7219563d4ecae76ad18b3ca35730dd4feaa5eb11521538a06ef4",
+      "size": 1398
+    },
+    {
+      "classification": "test",
+      "path": "tests/test_firstlight_replay_smoke.py",
+      "sha256": "036800df14704469a5276681caaa10d78a3c1ecf50202b132be8034fd748850d",
+      "size": 2645
+    },
+    {
+      "classification": "test",
+      "path": "tests/test_firstlight_v4.py",
+      "sha256": "960a052005aa2b2cf8624bbab7896a92fbc23e05871993e49160ac69079425c3",
+      "size": 1264
+    },
+    {
+      "classification": "test",
+      "path": "tests/test_full_episode_audit.py",
+      "sha256": "e61449efa0c97758e134f7622c69e53fba2a2b1157937254d0d7145194f5de20",
+      "size": 7947
+    },
+    {
+      "classification": "test",
+      "path": "tests/test_full_episode_cache.py",
+      "sha256": "20f5f97b6c151a4d7face5106bea2d02e48830c63c9270f359d992c1ce62af52",
+      "size": 9133
+    },
+    {
+      "classification": "test",
+      "path": "tests/test_full_episode_reader.py",
+      "sha256": "cb397b0b680d7a725a6588d03ff79090849040d02d9bb1333dd13d974d2005ca",
+      "size": 4550
+    },
+    {
+      "classification": "test",
+      "path": "tests/test_full_episode_replay.py",
+      "sha256": "1f93ba3dd2ebdecd0936bd305c2d905abb9f32ab6516c9ae287152235c6e2c1c",
+      "size": 8821
+    },
+    {
+      "classification": "test",
+      "path": "tests/test_observation_profiles.py",
+      "sha256": "44d2f3359f44ce08e43b1e7b412f5a08d6cc4d93197faffaa9fff9b34dff21e1",
+      "size": 4814
+    },
+    {
+      "classification": "test",
+      "path": "tests/test_recurrent_batching.py",
+      "sha256": "e0fcac60fbab52c96065e0c725d946f432cec59d96fa60a269d2f98a69d74e99",
+      "size": 8583
+    },
+    {
+      "classification": "test",
+      "path": "tests/test_recurrent_cache.py",
+      "sha256": "a60972e1482a90f3b5ecc1b1b2b5fe237866d5498c9265f956189a3e088a181d",
+      "size": 11346
+    },
+    {
+      "classification": "test",
+      "path": "tests/test_recurrent_execution.py",
+      "sha256": "9fe3d8ecfea71b13f41e839ce226a2bd80c480d9adaceef51bba81a28ba0851f",
+      "size": 3609
+    },
+    {
+      "classification": "test",
+      "path": "tests/test_recurrent_il.py",
+      "sha256": "2719ec8f1e4bb435849c7659a1c18c1473bcc2bcc0931c3665a0e83c226329c7",
+      "size": 37127
+    },
+    {
+      "classification": "test",
+      "path": "tests/test_recurrent_labels.py",
+      "sha256": "c1f61a1ec34629f25e1dd45356427860a6204778a98a985919a65a5e484b6ae7",
+      "size": 7708
+    },
+    {
+      "classification": "test",
+      "path": "tests/test_recurrent_sharded_cache.py",
+      "sha256": "d4c268730fa28bf0c49fb9c364157cabd0b2b74935eff2755f4cc3137b5f0127",
+      "size": 11826
+    },
+    {
+      "classification": "test",
+      "path": "tests/test_recurrent_streaming.py",
+      "sha256": "ec772af9545732233d9bf0a9786b14d4a0ed4fd28b334b3fc2a15297de5e8d2c",
+      "size": 7357
+    },
+    {
+      "classification": "test",
+      "path": "tests/test_replay_timeline.py",
+      "sha256": "19081f042549de68c1416e4ee925d328833ddec9166df8854ec213d25fb84f7a",
+      "size": 8212
+    },
+    {
+      "classification": "test",
+      "path": "tests/test_resident_batch_benchmark.py",
+      "sha256": "7a6fd23272bb329b975655f5a8f877f9c8f178e809192e0833e6be1d56c7621f",
+      "size": 10737
+    },
+    {
+      "classification": "test",
+      "path": "tests/test_resident_full_episode.py",
+      "sha256": "ad7188ce944b13ed002a6eaec35175461e2d3e5e8f194c5bf511551397878243",
+      "size": 4582
+    },
+    {
+      "classification": "test",
+      "path": "tests/test_seal_recurrent_sharded_subset.py",
+      "sha256": "6cc2098309b16e14cbeeaa65308b9f8de2a1e8a7a1607829c9fdc0d1f0d9c2ac",
+      "size": 3066
+    },
+    {
+      "classification": "test",
+      "path": "tests/test_semantic_frame_contracts.py",
+      "sha256": "891e6dc027149f4319be8264fa5189f339b1da646e4b84ad99b3b40452783eb1",
+      "size": 1635
+    },
+    {
+      "classification": "test",
+      "path": "tests/test_semantic_frame_tensorizer_v1.py",
+      "sha256": "1b48e5281b2ac785409579703a1de03258dbd993f75338041aa95ef0efb9d478",
+      "size": 5568
+    },
+    {
+      "classification": "test",
+      "path": "tests/test_stateless_v4_policy.py",
+      "sha256": "c7788b3e5b325202e6402232c630c97da41a3ecab04b19e112d3387852a4ae9d",
+      "size": 3639
+    },
+    {
+      "classification": "test",
+      "path": "tests/test_temporal_v4_input.py",
+      "sha256": "2d8370f08e244f365a43e23a2a1f1767f179b70f33feb009dc534367404bef5d",
+      "size": 8485
+    },
+    {
+      "classification": "test",
+      "path": "tests/test_tiny_overfit.py",
+      "sha256": "9e15cd02bcde08a8ee24eaa4cd12a559118f8a51eb202631656e5ae0d0a44358",
+      "size": 1578
+    },
+    {
+      "classification": "test",
+      "path": "tests/test_training_cache_reader.py",
+      "sha256": "791184eb79a09a573ba15ad34f1ece6a4892f0196e2de139788d2dd5e824ab38",
+      "size": 4013
+    },
+    {
+      "classification": "test",
+      "path": "tests/test_training_history.py",
+      "sha256": "36d9bb58704727f13496d6a7662dba46bb86abbb24cbe2ef444a3ca4922bee40",
+      "size": 6683
+    },
+    {
+      "classification": "source",
+      "path": "tools/audit_full_episode_cache.py",
+      "sha256": "ed346a5f3e8b84d51ba0b5364e4a016f7e9474b00009d485ac6113e2f5b907a1",
+      "size": 23291
+    },
+    {
+      "classification": "source",
+      "path": "tools/audit_optimized_probe2.py",
+      "sha256": "877252e9fefae7fc0b6ce6bdff1a5cd6c336b4eccf3c6cb6ca068393902064aa",
+      "size": 3390
+    },
+    {
+      "classification": "source",
+      "path": "tools/benchmark_resident_batch.py",
+      "sha256": "963b43012f96b4943f0edfa7dfc08196a7d6f3bc832d475e055eea84e016f303",
+      "size": 10499
+    },
+    {
+      "classification": "source",
+      "path": "tools/build_full_episode_cache.py",
+      "sha256": "87665834781b3d67df9ee4bdf119f2ae4891b456cba8e08ab57f681b3bb35d58",
+      "size": 29877
+    },
+    {
+      "classification": "source",
+      "path": "tools/checkpoint_v1_capture.ps1",
+      "sha256": "c1cfe6387f70a52443498f659d04e5fe8ffdb0718b6520d2318e05cf58e18abb",
+      "size": 7404
+    },
+    {
+      "classification": "source",
+      "path": "tools/checkpoint_v1_formal.ps1",
+      "sha256": "4c8721c8d02d1d08e6b54223cfcef6c142edb0d733c4bdae540676368a2a5e43",
+      "size": 9445
+    },
+    {
+      "classification": "source",
+      "path": "tools/checkpoint_v1_formal_worker.ps1",
+      "sha256": "187db4ea6ff00be73a0fed96c3ab4aa7748051b0affa9ba150243b2328f02bfd",
+      "size": 3497
+    },
+    {
+      "classification": "source",
+      "path": "tools/checkpoint_v1_optimized_probe2.ps1",
+      "sha256": "fa6df0a177d7b9cf08a7c690a4d93f3895d9ee00d2e3b233b7abf5b475e41cf6",
+      "size": 2443
+    },
+    {
+      "classification": "source",
+      "path": "tools/checkpoint_v1_optimized_probe2_worker.ps1",
+      "sha256": "60a7dafa7e261e08d24f9006a7fbb28453753bc0b49fc49d89a6e0aa143bd6fc",
+      "size": 2049
+    },
+    {
+      "classification": "source",
+      "path": "tools/checkpoint_v1_probe2.ps1",
+      "sha256": "97c7e8367e16a9d8b3dd06c38becfe633beb400809f298ca7c4613a3f23afc34",
+      "size": 3403
+    },
+    {
+      "classification": "source",
+      "path": "tools/checkpoint_v1_probe2_worker.ps1",
+      "sha256": "169e15233356354af8f7688faa3ae83d6112693671f7c306d4e9c1307180519a",
+      "size": 2164
+    },
+    {
+      "classification": "source",
+      "path": "tools/checkpoint_v1_smoke.ps1",
+      "sha256": "f436947bcc8761f0d306ab34d6620900d4a3965c65c2762a5c43f908f656d96c",
+      "size": 4412
+    },
+    {
+      "classification": "source",
+      "path": "tools/checkpoint_v1_smoke_worker.ps1",
+      "sha256": "5c5cba85064c060f03319fc1dd6e07a471cac9da4ac76f56368d5851e1a86cd3",
+      "size": 2271
+    },
+    {
+      "classification": "source",
+      "path": "tools/compile_recurrent_v4_cache.py",
+      "sha256": "d866d06ea2122d0e032ed5f29ed29b839b59d9beb96e299db0b2c3bf11d746d5",
+      "size": 41111
+    },
+    {
+      "classification": "source",
+      "path": "tools/evaluate_recurrent_il.py",
+      "sha256": "e3e9c8b7b58fd1102bc79173ed6f67062acb2ffa7b56e4d913aea9a1b0755a0d",
+      "size": 2895
+    },
+    {
+      "classification": "source",
+      "path": "tools/formal_layer2_compile.ps1",
+      "sha256": "93acb171eba9f4578abf6100bff5e92466eade9b43f3a1a52fa68da54d632830",
+      "size": 5232
+    },
+    {
+      "classification": "source",
+      "path": "tools/inspect_checkpoint_v1.py",
+      "sha256": "79bfe2083e7c44586db0b3d73e59eb146f5418e5ea95782ce31cf96c83f47357",
+      "size": 1910
+    },
+    {
+      "classification": "source",
+      "path": "tools/resume_singleton_canary10.ps1",
+      "sha256": "210a5c189381f0eea72e24afebfaef01c5471aad6bd11d7bb2027f3c58fee691",
+      "size": 8391
+    },
+    {
+      "classification": "source",
+      "path": "tools/run_firstlight_adapter_cache_validation.py",
+      "sha256": "ca62b510873b3b546f5f08f8c7f3d1185a00e540fbd66a4ea1308d6e2d3bac27",
+      "size": 7331
+    },
+    {
+      "classification": "source",
+      "path": "tools/run_tiny_overfit.py",
+      "sha256": "a4d675325e60b9e536f34809bfb6dd7ce1da72010f30ef06af03996de07cd15f",
+      "size": 1659
+    },
+    {
+      "classification": "source",
+      "path": "tools/seal_recurrent_sharded_subset.py",
+      "sha256": "0b3ed715a4a8e0c403dd6384f63e6d58c68769935a384c6e20cf1f9a035e844f",
+      "size": 16665
+    },
+    {
+      "classification": "source",
+      "path": "tools/summarize_firstlight_adapter_pilot.py",
+      "sha256": "4c759986ee5358f9adbe8beb2244acabf696b3da02955f7dacd8801f2aed493b",
+      "size": 43514
+    },
+    {
+      "classification": "source",
+      "path": "tools/train_recurrent_il.py",
+      "sha256": "795ec96347511377203213542a715f57075faffef7e7e039e8c39a97f55a95af",
+      "size": 16367
+    },
+    {
+      "classification": "source",
+      "path": "tools/validate_firstlight_adapter.py",
+      "sha256": "61a51ea7540b19af375e8364deb7b96276dec510aa1866eda8f88d021f3ba476",
+      "size": 1583
+    }
+  ],
+  "entry_count": 102,
+  "formal_checkpoint": {
+    "artifact_name": "ElixirEchoBaseline",
+    "checkpoint_id": "3fa9bd4e716744a49e30ca0e2ce7b8e3",
+    "relative_source_path": "runs/checkpoint_v1_formal_epoch1/checkpoint-v1.pt",
+    "sha256": "49a76994020c49e60b3b7d90b7eaf7cc53ffaef3c679f3caa4130cb5c0c71548",
+    "size": 145280508,
+    "training_report_sha256": "5963a72fc24c41f045df7ed2c4b771f94de65a8c6d48c5f7b3e3d78f09682689"
+  },
+  "schema": "elixir_echo.source_inventory@1",
+  "source_alias": "legacy_source"
+}
