@@ -1,0 +1,61 @@
+{
+  "action_mask": {
+    "identity": {
+      "actor": 0,
+      "episode_id": "episode-1",
+      "tick": 90
+    },
+    "kinds": {
+      "play_card": true,
+      "wait": true
+    }
+  },
+  "episode_context_ref": "context-sha256",
+  "event_delta": [
+    {
+      "kind": "unit_spawned",
+      "owner": 1
+    }
+  ],
+  "expert_action": [
+    {
+      "kind": "play_card",
+      "position": [
+        9.0,
+        12.0
+      ],
+      "slot": 2
+    }
+  ],
+  "fingerprints": {
+    "observation_schema": "fixture"
+  },
+  "frame": {
+    "entities": [],
+    "match": {
+      "phase": "normal",
+      "remaining_ms": 120000
+    },
+    "perspective": "actor_fair",
+    "players": [
+      {
+        "owner": 0,
+        "relation": "self"
+      }
+    ],
+    "terminal": {
+      "ended": false
+    },
+    "towers": [],
+    "version": "semantic-frame.v1"
+  },
+  "identity": {
+    "actor": 0,
+    "episode_id": "episode-1",
+    "tick": 90
+  },
+  "validation": {
+    "accepted": true
+  },
+  "version": "semantic-frame-cache-record.v1"
+}
