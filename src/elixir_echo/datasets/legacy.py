@@ -121,6 +121,7 @@ class LegacyTrajectoryReader:
             "split": str(manifest_payload["split"]),
             "episode_context_ref": context_ref,
             "source_manifest_sha256": stored_manifest_hash,
+            "source_record_hashes": tuple(hashes),
         }
         ticks = tuple(sorted({step.identity.tick for step in records}))
         if not ticks or ticks[0] != int(manifest_payload["first_tick"]) or ticks[-1] != int(manifest_payload["last_tick"]):
@@ -141,10 +142,10 @@ class LegacyTrajectoryReader:
             first_tick=int(manifest_payload["first_tick"]),
             last_tick=int(manifest_payload["last_tick"]),
             record_count=expected_count,
-            # The compatibility view carries the verified source identities;
-            # canonical in-memory step hashes are intentionally not substituted.
-            record_hashes=tuple(hashes),
-            aggregate_hash=str(manifest_payload["aggregate_hash"]),
+            record_hashes=tuple(step.content_sha256() for step in records),
+            aggregate_hash=aggregate_record_hash(
+                episode_id, tuple(step.content_sha256() for step in records)
+            ),
             metadata_sha256=content_sha256(metadata),
             split=str(manifest_payload["split"]),
         )

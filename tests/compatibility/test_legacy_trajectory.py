@@ -39,7 +39,8 @@ def test_opt_in_legacy_episode_is_verified_and_mapped_without_rewrite(monkeypatc
     with (episode_path / "records.jsonl").open("r", encoding="utf-8") as stream:
         source_records = [json.loads(line) for line in stream if line.strip()]
     assert len(source_records) == len(episode.records)
-    assert episode.manifest.record_hashes == tuple(item["content_sha256"] for item in source_records)
+    assert episode.metadata["source_record_hashes"] == tuple(item["content_sha256"] for item in source_records)
+    assert episode.manifest.record_hashes == tuple(item.content_sha256() for item in episode.records)
     for source, mapped in zip(source_records, episode.records, strict=True):
         assert source["identity"] == mapped.identity.to_dict()
         assert source["expert_action"] == mapped.expert_action.to_legacy()
