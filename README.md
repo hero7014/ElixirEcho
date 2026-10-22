@@ -42,7 +42,8 @@ uv run elixir-echo --help
 The test suite exercises the local contracts and compatibility boundaries. Tests that
 need PyTorch, a FirstLight checkout, or a private replay cache are optional and skip when
 those resources are not configured. The FirstLight optimizer smoke is separately gated
-by `ELIXIR_ECHO_RUN_TRAINING_SMOKE=1`; normal tests and CLI commands do not train.
+by `ELIXIR_ECHO_RUN_TRAINING_SMOKE=1`. CLI training is dry-run by default and starts
+only when `train-firstlight` is explicitly passed `--run` with a required episode cap.
 
 ## Verify a local trajectory cache
 
@@ -56,6 +57,42 @@ uv run elixir-echo verify-trajectory "D:\path\to\trajectory-cache"
 
 The report intentionally excludes episode context, complete decks, provider diagnostics,
 and other audit-only metadata.
+
+## Plan or run a capped FirstLight training pass
+
+The training command first verifies the trajectory store and builds a stable fingerprint
+from the safe training projection only. It selects only terminated episodes in the
+`train` split; validation, test, and truncated episodes never enter this first pass.
+Without `--run`, the command only prints a plan and does not import FirstLight/PyTorch,
+create a model, or write checkpoints.
+
+```powershell
+uv run elixir-echo train-firstlight `
+  "D:\path\to\trajectory-cache" `
+  --firstlight-root "D:\path\to\FirstLight_CR" `
+  --checkpoint-directory "D:\path\to\elixirecho-checkpoints" `
+  --max-episodes 2
+```
+
+After reviewing the plan, add `--run` to execute that capped pass. To continue from an
+immutable checkpoint, pass its directory with `--resume-from`; the dataset fingerprint
+and episode prefix are checked before model/optimizer state is restored. Choose `--device
+cuda` only after confirming the installed PyTorch build supports the intended GPU.
+
+```powershell
+uv run elixir-echo train-firstlight `
+  "D:\path\to\trajectory-cache" `
+  --firstlight-root "D:\path\to\FirstLight_CR" `
+  --checkpoint-directory "D:\path\to\elixirecho-checkpoints" `
+  --max-episodes 2 `
+  --checkpoint-every 1 `
+  --device cuda `
+  --run
+```
+
+Training uses the RICH profile and the existing recurrent FirstLight V4 imitation-learning
+wrapper. This command is a capped research entry point, not a claim of model quality or a
+recommendation to start large-scale training.
 
 ## Optional FirstLight compatibility checks
 
