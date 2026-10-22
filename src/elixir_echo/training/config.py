@@ -69,9 +69,14 @@ class TrainingConfig:
             raise ValueError("the first training pass uses AdamW")
 
     def to_dict(self) -> dict[str, Any]:
+        supervision_masks = {
+            category.value: supervision_for(category, self).to_dict()
+            for category in LabelCategory
+        }
         return {
             "profile": self.profile.value,
             "supported_label_categories": [item.value for item in self.supported_label_categories],
+            "supervision_masks": supervision_masks,
             "loss_weights": {
                 "gate": float(self.gate_loss_weight),
                 "candidate": float(self.candidate_loss_weight),
