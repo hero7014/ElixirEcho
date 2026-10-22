@@ -29,6 +29,11 @@ class TrainingDatasetPlan:
     selected_label_counts: dict[str, int]
     excluded_split_episode_count: int
     excluded_truncated_episode_count: int
+    source_episode_count: int
+    source_split_counts: dict[str, int]
+    source_outcome_counts: dict[str, int]
+    source_split_outcome_counts: dict[str, int]
+    assigned_without_episode_manifest_count: int
 
     @property
     def selected_episode_count(self) -> int:
@@ -42,6 +47,11 @@ class TrainingDatasetPlan:
             "selected_label_counts": dict(sorted(self.selected_label_counts.items())),
             "excluded_split_episode_count": self.excluded_split_episode_count,
             "excluded_truncated_episode_count": self.excluded_truncated_episode_count,
+            "source_episode_count": self.source_episode_count,
+            "source_split_counts": dict(sorted(self.source_split_counts.items())),
+            "source_outcome_counts": dict(sorted(self.source_outcome_counts.items())),
+            "source_split_outcome_counts": dict(sorted(self.source_split_outcome_counts.items())),
+            "assigned_without_episode_manifest_count": self.assigned_without_episode_manifest_count,
             "selection": "first max_episodes terminated episodes in train split",
         }
 
@@ -66,24 +76,16 @@ def plan_training_dataset(
     labels: Counter[str] = Counter()
     selected_decisions = excluded_split = excluded_truncated = 0
     digest = hashlib.sha256(_FINGERPRINT_SCHEMA)
-    seen: set[str] = set()
+    source_split_counts: Counter[str] = Counter()
+    source_outcome_counts: Counter[str] = Counter()
+    source_split_outcome_counts: Counter[str] = Counter()
+    source_episode_count = 0
+    assigned_without_episode_manifest_count = 0
 
-    for episode in reader.iter_episodes():
-        if episode.episode_id in seen:
-            raise ValueError(f"duplicate episode identity in training cache: {episode.episode_id}")
-        seen.add(episode.episode_id)
-        if episode.split is None:
-            raise ValueError(f"episode {episode.episode_id!r} has no frozen dataset split")
-        if episode.split != "train":
-            excluded_split += 1
-            continue
-        if episode.outcome == "truncated":
-            excluded_truncated += 1
-            continue
-        if episode.outcome != "terminated":
-            raise ValueError(f"episode {episode.episode_id!r} has unsupported outcome {episode.outcome!r}")
-        if len(selected_ids) >= max_episodes:
-            continue
+    def include_episode(episode: TrainingEpisode) -> None:
+        nonlocal selected_decisions
+        if episode.split != "train" or episode.outcome != "terminated":
+            raise ValueError("dataset planner selected an ineligible training episode")
         episode_digest = _safe_episode_digest(episode)
         selected_ids.append(episode.episode_id)
         selected_hashes.append(episode_digest)
@@ -93,6 +95,42 @@ def plan_training_dataset(
         selected_decisions += len(episode.steps)
         labels.update(classify_expert_action(step.expert_action).value for step in episode.steps)
 
+    catalog_factory = getattr(reader, "training_catalog", None)
+    if callable(catalog_factory):
+        catalog = catalog_factory(max_episodes=max_episodes)
+        for episode_id in catalog.selected_episode_ids:
+            include_episode(reader.read_episode(episode_id))
+        source_split_counts.update(catalog.split_counts)
+        source_outcome_counts.update(catalog.outcome_counts)
+        source_split_outcome_counts.update(catalog.split_outcome_counts)
+        source_episode_count = catalog.episode_count
+        excluded_split = catalog.excluded_split_episode_count
+        excluded_truncated = catalog.excluded_truncated_episode_count
+        assigned_without_episode_manifest_count = catalog.assigned_without_episode_manifest_count
+    else:
+        seen: set[str] = set()
+        for episode in reader.iter_episodes():
+            source_episode_count += 1
+            source_split_counts[episode.split or "unknown"] += 1
+            source_outcome_counts[episode.outcome] += 1
+            source_split_outcome_counts[f"{episode.split or 'unknown'}/{episode.outcome}"] += 1
+            if episode.episode_id in seen:
+                raise ValueError(f"duplicate episode identity in training cache: {episode.episode_id}")
+            seen.add(episode.episode_id)
+            if episode.split is None:
+                raise ValueError(f"episode {episode.episode_id!r} has no frozen dataset split")
+            if episode.split != "train":
+                excluded_split += 1
+                continue
+            if episode.outcome == "truncated":
+                excluded_truncated += 1
+                continue
+            if episode.outcome != "terminated":
+                raise ValueError(f"episode {episode.episode_id!r} has unsupported outcome {episode.outcome!r}")
+            if len(selected_ids) >= max_episodes:
+                continue
+            include_episode(episode)
+
     return TrainingDatasetPlan(
         fingerprint=digest.hexdigest(),
         selected_episode_ids=tuple(selected_ids),
@@ -101,6 +139,11 @@ def plan_training_dataset(
         selected_label_counts=dict(sorted(labels.items())),
         excluded_split_episode_count=excluded_split,
         excluded_truncated_episode_count=excluded_truncated,
+        source_episode_count=source_episode_count,
+        source_split_counts=dict(sorted(source_split_counts.items())),
+        source_outcome_counts=dict(sorted(source_outcome_counts.items())),
+        source_split_outcome_counts=dict(sorted(source_split_outcome_counts.items())),
+        assigned_without_episode_manifest_count=assigned_without_episode_manifest_count,
     )
 
 
@@ -110,24 +153,17 @@ def iter_verified_training_episodes(
 ) -> Iterator[TrainingEpisode]:
     """Yield the planned episodes while detecting cache changes before use."""
 
-    index = 0
-    seen: set[str] = set()
-    for episode in reader.iter_episodes():
-        if episode.episode_id in seen:
-            raise ValueError(f"duplicate episode identity in training cache: {episode.episode_id}")
-        seen.add(episode.episode_id)
-        if episode.split != "train" or episode.outcome != "terminated":
-            continue
-        if index >= plan.selected_episode_count:
-            continue
-        if episode.episode_id != plan.selected_episode_ids[index]:
+    for episode_id, expected_digest in zip(
+        plan.selected_episode_ids,
+        plan.episode_content_sha256,
+        strict=True,
+    ):
+        episode = reader.read_episode(episode_id)
+        if episode.episode_id != episode_id:
             raise ValueError("training cache order changed after dataset fingerprinting")
-        if _safe_episode_digest(episode) != plan.episode_content_sha256[index]:
+        if _safe_episode_digest(episode) != expected_digest:
             raise ValueError(f"training episode changed after dataset fingerprinting: {episode.episode_id}")
-        index += 1
         yield episode
-    if index != plan.selected_episode_count:
-        raise ValueError("training cache ended before the planned episode prefix")
 
 
 def run_firstlight_training(

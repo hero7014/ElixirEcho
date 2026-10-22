@@ -10,6 +10,7 @@ import sys
 from typing import Sequence
 
 from elixir_echo import __version__
+from elixir_echo.datasets.legacy import LegacyTrainingTrajectoryStoreReader
 from elixir_echo.datasets.trajectory import TrainingTrajectoryReader
 from elixir_echo.training.firstlight_run import plan_training_dataset, run_firstlight_training
 
@@ -93,13 +94,28 @@ def _train_firstlight(args: argparse.Namespace) -> dict[str, object]:
     if args.checkpoint_every <= 0:
         raise ValueError("--checkpoint-every must be a positive integer")
 
-    reader = TrainingTrajectoryReader(cache_root)
+    if next((cache_root / "episodes").glob("*/*/trajectory_manifest.json"), None) is not None:
+        reader = TrainingTrajectoryReader(cache_root)
+        cache_format = "trajectory-store"
+        verification_scope = "all episode records are verified while cataloging"
+    elif (cache_root / "split_manifest.json").is_file() and next(
+        (cache_root / "episodes").glob("*/*/episode_manifest.json"), None
+    ) is not None:
+        reader = LegacyTrainingTrajectoryStoreReader(cache_root)
+        cache_format = "sealed-legacy-full-episode-store"
+        verification_scope = (
+            "all episode/split manifests are verified; selected episodes receive full record/context/hash validation"
+        )
+    else:
+        raise ValueError(f"unsupported trajectory cache layout: {cache_root}")
     plan = plan_training_dataset(reader, max_episodes=args.max_episodes)
     if not args.run:
         return {
             "schema": "elixir_echo.training_run_plan@1",
             "mode": "dry_run",
             "cache_root": str(cache_root),
+            "cache_format": cache_format,
+            "verification_scope": verification_scope,
             "firstlight_root": str(args.firstlight_root.expanduser().resolve()),
             "checkpoint_directory": str(args.checkpoint_directory.expanduser().absolute()),
             "max_episodes": args.max_episodes,
@@ -112,6 +128,7 @@ def _train_firstlight(args: argparse.Namespace) -> dict[str, object]:
     return {
         "schema": "elixir_echo.training_run_result@1",
         "cache_root": str(cache_root),
+        "cache_format": cache_format,
         **run_firstlight_training(
             reader,
             plan,
