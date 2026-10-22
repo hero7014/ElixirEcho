@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 import math
+from collections.abc import Iterable
 from typing import Any
 
+from elixir_echo.datasets.trajectory import TrainingEpisode
+from elixir_echo.integrations.firstlight.il import compile_firstlight_actor_sequence
 from elixir_echo.integrations.firstlight.policy import FirstLightPolicyBackend
 from elixir_echo.training.config import TrainingConfig
 from elixir_echo.training.sequence import CompiledActorSequence
@@ -39,6 +42,21 @@ class RecurrentSequenceTrainResult:
     optimizer_steps: int
     loss_history: tuple[float, ...]
     gradient_norms: tuple[float, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class TrainingPassResult:
+    """Aggregate metrics for one train-split pass over complete episodes."""
+
+    episode_count: int
+    actor_sequence_count: int
+    decision_count: int
+    trainable_decision_count: int
+    excluded_split_episode_count: int
+    excluded_truncated_episode_count: int
+    excluded_untrainable_actor_sequence_count: int
+    optimizer_steps: int
+    loss_history: tuple[float, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -278,6 +296,93 @@ class FirstLightILTrainer:
             optimizer_steps=chunks,
             loss_history=tuple(losses),
             gradient_norms=tuple(gradient_norms),
+        )
+
+    def train_episodes(
+        self,
+        episodes: Iterable[TrainingEpisode],
+        *,
+        input_builder: Any,
+        optimizer: Any | None = None,
+        max_episodes: int | None = None,
+    ) -> TrainingPassResult:
+        """Run one sequential training pass over explicit train-split episodes.
+
+        Validation/test episodes are never compiled. Truncated episodes remain
+        available in Layer 1 but are excluded from this first checkpoint pass.
+        One optimizer instance is shared across actor sequences and replays.
+        """
+
+        import torch
+
+        if max_episodes is not None and (type(max_episodes) is not int or max_episodes <= 0):
+            raise ValueError("max_episodes must be a positive integer when provided")
+        shared_optimizer = optimizer
+        if shared_optimizer is None:
+            shared_optimizer = torch.optim.AdamW(
+                self.backend.model.parameters(),
+                lr=self.config.learning_rate,
+                weight_decay=self.config.weight_decay,
+            )
+
+        episode_ids: set[str] = set()
+        episode_count = actor_sequence_count = decision_count = 0
+        trainable_decision_count = excluded_split = excluded_truncated = optimizer_steps = 0
+        excluded_untrainable_sequences = 0
+        loss_history: list[float] = []
+        episode_iterator = iter(episodes)
+        while max_episodes is None or episode_count < max_episodes:
+            try:
+                episode = next(episode_iterator)
+            except StopIteration:
+                break
+            if episode.split is None:
+                raise ValueError(f"episode {episode.episode_id!r} has no frozen dataset split")
+            if episode.split != "train":
+                excluded_split += 1
+                continue
+            if episode.outcome == "truncated":
+                excluded_truncated += 1
+                continue
+            if episode.outcome != "terminated":
+                raise ValueError(f"episode {episode.episode_id!r} has unsupported outcome {episode.outcome!r}")
+            if episode.episode_id in episode_ids:
+                raise ValueError(f"duplicate training episode identity {episode.episode_id!r}")
+            # Compile both actor views before updating on either one, so input
+            # and label validation cannot fail halfway through an episode.
+            compiled_sequences = tuple(
+                compile_firstlight_actor_sequence(
+                    episode,
+                    actor=actor,
+                    input_builder=input_builder,
+                    components=self.backend.components,
+                    config=self.config,
+                )
+                for actor in (0, 1)
+            )
+            for compiled in compiled_sequences:
+                actor_sequence_count += 1
+                decision_count += len(compiled.labels)
+                trainable_decision_count += compiled.trainable_count
+                if not compiled.trainable_count:
+                    excluded_untrainable_sequences += 1
+                    continue
+                result = self.train_sequence(compiled, optimizer=shared_optimizer)
+                optimizer_steps += result.optimizer_steps
+                loss_history.extend(result.loss_history)
+            episode_ids.add(episode.episode_id)
+            episode_count += 1
+
+        return TrainingPassResult(
+            episode_count=episode_count,
+            actor_sequence_count=actor_sequence_count,
+            decision_count=decision_count,
+            trainable_decision_count=trainable_decision_count,
+            excluded_split_episode_count=excluded_split,
+            excluded_truncated_episode_count=excluded_truncated,
+            excluded_untrainable_actor_sequence_count=excluded_untrainable_sequences,
+            optimizer_steps=optimizer_steps,
+            loss_history=tuple(loss_history),
         )
 
     def tiny_overfit(

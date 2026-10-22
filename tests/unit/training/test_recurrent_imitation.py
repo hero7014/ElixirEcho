@@ -8,6 +8,7 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from elixir_echo.integrations.firstlight.trainer import FirstLightILTrainer
+from elixir_echo.datasets.trajectory import TrainingEpisode
 from elixir_echo.training.config import HeadSupervision, TrainingConfig
 from elixir_echo.training.labels import CompiledLabel, LabelCategory
 
@@ -180,3 +181,133 @@ def test_tbptt_carries_only_detached_state_across_ordered_chunks_and_starts_empt
     assert seen[1][4] is not None and not seen[1][4].requires_grad
     assert seen[2][4] is not None and not seen[2][4].requires_grad
     assert len(result.loss_history) == len(result.gradient_norms) == 3
+
+
+def test_training_pass_uses_only_train_terminated_episodes_and_resets_per_actor(monkeypatch):
+    from elixir_echo.integrations.firstlight import trainer as firstlight_trainer
+
+    labels = (
+        _label(LabelCategory.WAIT, HeadSupervision(gate=True)),
+        _label(LabelCategory.SINGLE_PLAY_CARD, HeadSupervision(gate=True)),
+    )
+    episodes = (
+        TrainingEpisode("train-a", "terminated", "train", (object(),)),
+        TrainingEpisode("valid-a", "terminated", "validation", (object(),)),
+        TrainingEpisode("truncated-a", "truncated", "train", (object(),)),
+    )
+    compiler_calls = []
+
+    def compile_episode(episode, *, actor, **_kwargs):
+        compiler_calls.append((episode.episode_id, actor))
+        return SimpleNamespace(
+            episode_id=episode.episode_id,
+            actor=actor,
+            labels=labels,
+            trainable_count=2,
+        )
+
+    monkeypatch.setattr(firstlight_trainer, "compile_firstlight_actor_sequence", compile_episode)
+    trainer = object.__new__(FirstLightILTrainer)
+    trainer.config = TrainingConfig(tbptt_length=2)
+    trainer.backend = SimpleNamespace(model=object(), runtime=object(), components=object())
+    training_calls = []
+
+    def train_sequence(compiled, *, optimizer=None):
+        training_calls.append((compiled.episode_id, compiled.actor, optimizer))
+        return SimpleNamespace(optimizer_steps=1, loss_history=(0.5,))
+
+    trainer.train_sequence = train_sequence
+    shared_optimizer = object()
+
+    result = trainer.train_episodes(
+        episodes,
+        input_builder=object(),
+        optimizer=shared_optimizer,
+    )
+
+    assert compiler_calls == [("train-a", 0), ("train-a", 1)]
+    assert training_calls == [
+        ("train-a", 0, shared_optimizer),
+        ("train-a", 1, shared_optimizer),
+    ]
+    assert result.episode_count == 1
+    assert result.actor_sequence_count == 2
+    assert result.decision_count == 4
+    assert result.trainable_decision_count == 4
+    assert result.excluded_split_episode_count == 1
+    assert result.excluded_truncated_episode_count == 1
+    assert result.excluded_untrainable_actor_sequence_count == 0
+    assert result.optimizer_steps == 2
+    assert result.loss_history == (0.5, 0.5)
+
+
+def test_training_pass_stops_consuming_episodes_at_requested_limit(monkeypatch):
+    from elixir_echo.integrations.firstlight import trainer as firstlight_trainer
+
+    labels = (_label(LabelCategory.WAIT, HeadSupervision(gate=True)),)
+    episode = TrainingEpisode("train-a", "terminated", "train", (object(),))
+    monkeypatch.setattr(
+        firstlight_trainer,
+        "compile_firstlight_actor_sequence",
+        lambda episode, *, actor, **_kwargs: SimpleNamespace(
+            episode_id=episode.episode_id,
+            actor=actor,
+            labels=labels,
+            trainable_count=1,
+        ),
+    )
+    trainer = object.__new__(FirstLightILTrainer)
+    trainer.config = TrainingConfig()
+    trainer.backend = SimpleNamespace(model=object(), components=object())
+    trainer.train_sequence = lambda *_args, **_kwargs: SimpleNamespace(
+        optimizer_steps=1, loss_history=(0.25,)
+    )
+
+    def episodes():
+        yield episode
+        raise AssertionError("training pass read beyond max_episodes")
+
+    result = trainer.train_episodes(
+        episodes(),
+        input_builder=object(),
+        optimizer=object(),
+        max_episodes=1,
+    )
+
+    assert result.episode_count == 1
+
+
+def test_training_pass_reports_but_does_not_train_actor_sequences_without_supported_labels(monkeypatch):
+    from elixir_echo.integrations.firstlight import trainer as firstlight_trainer
+
+    unsupported = (_label(LabelCategory.SINGLE_ABILITY, HeadSupervision()),)
+    episode = TrainingEpisode("train-empty", "terminated", "train", (object(),))
+    monkeypatch.setattr(
+        firstlight_trainer,
+        "compile_firstlight_actor_sequence",
+        lambda episode, *, actor, **_kwargs: SimpleNamespace(
+            episode_id=episode.episode_id,
+            actor=actor,
+            labels=unsupported,
+            trainable_count=0,
+        ),
+    )
+    trainer = object.__new__(FirstLightILTrainer)
+    trainer.config = TrainingConfig()
+    trainer.backend = SimpleNamespace(model=object(), components=object())
+    training_calls = []
+    trainer.train_sequence = lambda *args, **kwargs: training_calls.append((args, kwargs))
+
+    result = trainer.train_episodes(
+        (episode,),
+        input_builder=object(),
+        optimizer=object(),
+    )
+
+    assert training_calls == []
+    assert result.episode_count == 1
+    assert result.actor_sequence_count == 2
+    assert result.decision_count == 2
+    assert result.trainable_decision_count == 0
+    assert result.excluded_untrainable_actor_sequence_count == 2
+    assert result.optimizer_steps == 0
