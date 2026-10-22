@@ -6,9 +6,9 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from elixir_echo.domain import DecisionIdentity, DecisionStep, ExpertAction
+from elixir_echo.domain import DecisionIdentity, ExpertAction
 from elixir_echo.domain.values import canonical_json
-from .history import History, HistoryView, PreviousAction
+from .history import History, HistorySource, HistoryView, PreviousAction
 from .policy_input import TemporalContext
 
 
@@ -92,7 +92,7 @@ class PublicStateTracker:
         self._revealed_set: set[int] = set()
         self._public_plays: list[PublicPlay] = []
         self._play_distances: dict[int, tuple[int, bool]] = {}
-        self._pending_step: DecisionStep | None = None
+        self._pending_step: HistorySource | None = None
 
     def reset(self, identity: DecisionIdentity) -> None:
         self._episode_id = identity.episode_id
@@ -177,7 +177,7 @@ class PublicStateTracker:
             distances,
         )
 
-    def before_step(self, step: DecisionStep) -> TemporalContext:
+    def before_step(self, step: HistorySource) -> TemporalContext:
         if self._pending_step is not None:
             raise ValueError("the previous step action has not been committed")
         self._ensure_identity(step.identity)

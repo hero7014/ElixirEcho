@@ -5,7 +5,8 @@ build-backend = "hatchling.build"
 [project]
 name = "elixir-echo"
 version = "0.1.0"
-description = "Learning human play, one elixir decision at a time."
+description = "圣水回响 (ElixirEcho), a replay-based imitation-learning research toolkit for Clash Royale."
+readme = "README.md"
 requires-python = ">=3.12"
 dependencies = []
 
@@ -15,7 +16,8 @@ dev = [
 ]
 
 [project.scripts]
-elixir-echo = "elixir_echo.provenance:main"
+elixir-echo = "elixir_echo.cli:main"
+elixir-echo-source-inventory = "elixir_echo.provenance:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/elixir_echo"]
@@ -23,7 +25,7 @@ packages = ["src/elixir_echo"]
 [tool.pytest.ini_options]
 addopts = "-ra"
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 markers = [
   "firstlight: requires an explicitly configured read-only FirstLight checkout",
 ]

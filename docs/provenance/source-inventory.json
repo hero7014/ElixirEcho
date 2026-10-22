@@ -629,5 +629,5 @@
     "training_report_sha256": "5963a72fc24c41f045df7ed2c4b771f94de65a8c6d48c5f7b3e3d78f09682689"
   },
   "schema": "elixir_echo.source_inventory@1",
-  "source_alias": "legacy_source"
+  "source_alias": "validated-research-baseline"
 }

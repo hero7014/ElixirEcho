@@ -141,6 +141,26 @@ class TrainingEpisode:
         }
 
 
+def project_training_episode(episode: TrajectoryEpisode) -> TrainingEpisode:
+    """Drop episode/provider audit metadata at the training boundary."""
+
+    return TrainingEpisode(
+        episode_id=episode.manifest.episode_id,
+        outcome=episode.manifest.outcome,
+        split=episode.manifest.split,
+        steps=tuple(
+            TrainingStep(
+                identity=step.identity,
+                observation=step.observation,
+                action_mask=step.action_mask,
+                expert_action=step.expert_action,
+                event_delta=step.event_delta,
+            )
+            for step in episode.records
+        ),
+    )
+
+
 def _write_fsynced(path: Path, text: str) -> None:
     with path.open("w", encoding="utf-8", newline="\n") as stream:
         stream.write(text)
@@ -385,25 +405,11 @@ class TrainingTrajectoryReader:
 
     def iter_episodes(self) -> Iterator[TrainingEpisode]:
         for episode in self._reader.iter_episodes():
-            yield self._project(episode)
+            yield project_training_episode(episode)
 
     def read_episode(self, episode_id: str) -> TrainingEpisode:
-        return self._project(self._reader.read_episode(episode_id))
+        return project_training_episode(self._reader.read_episode(episode_id))
 
     @staticmethod
     def _project(episode: TrajectoryEpisode) -> TrainingEpisode:
-        return TrainingEpisode(
-            episode_id=episode.manifest.episode_id,
-            outcome=episode.manifest.outcome,
-            split=episode.manifest.split,
-            steps=tuple(
-                TrainingStep(
-                    identity=step.identity,
-                    observation=step.observation,
-                    action_mask=step.action_mask,
-                    expert_action=step.expert_action,
-                    event_delta=step.event_delta,
-                )
-                for step in episode.records
-            ),
-        )
+        return project_training_episode(episode)

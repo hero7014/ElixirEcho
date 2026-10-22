@@ -5,10 +5,19 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from typing import Any, Protocol
 
-from elixir_echo.domain import DecisionIdentity, DecisionStep, ExpertAction, Observation
+from elixir_echo.domain import DecisionIdentity, ExpertAction, Observation
 from elixir_echo.domain.values import canonical_json, frozen_map
+
+
+class HistorySource(Protocol):
+    """The training-safe fields needed to advance public temporal state."""
+
+    identity: DecisionIdentity
+    observation: Observation
+    expert_action: ExpertAction
+    event_delta: tuple[Mapping[str, Any], ...]
 
 
 class PreviousActionStatus(str, Enum):
@@ -118,7 +127,7 @@ class History:
         self._last_tick: int | None = None
         self._entries: list[HistoryEntry] = []
         self._previous_action = PreviousAction.start()
-        self._pending_step: DecisionStep | None = None
+        self._pending_step: HistorySource | None = None
 
     def reset(self, identity: DecisionIdentity) -> None:
         self._episode_id = identity.episode_id
@@ -129,7 +138,7 @@ class History:
         self._previous_action = PreviousAction.start()
         self._pending_step = None
 
-    def _validate_step(self, step: DecisionStep) -> None:
+    def _validate_step(self, step: HistorySource) -> None:
         if self._episode_id is None or self._actor is None or self._start_tick is None:
             raise ValueError("history must be reset before use")
         identity = step.identity
@@ -143,7 +152,7 @@ class History:
             if type(event_tick) is not int or event_tick > identity.tick:
                 raise ValueError("current public event is not causally available at this tick")
 
-    def before_step(self, step: DecisionStep) -> HistoryView:
+    def before_step(self, step: HistorySource) -> HistoryView:
         if self._pending_step is not None:
             raise ValueError("the previous input view has not been committed")
         self._validate_step(step)

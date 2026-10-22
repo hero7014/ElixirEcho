@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from elixir_echo.datasets.legacy import LegacyTrajectoryReader
+from elixir_echo.datasets.legacy import LegacyTrainingTrajectoryReader, LegacyTrajectoryReader
 from elixir_echo.domain.action import ACTION_MASK_SCHEMA
 
 
@@ -54,3 +54,14 @@ def test_opt_in_legacy_episode_is_verified_and_mapped_without_rewrite(monkeypatc
     source_manifest = json.loads((episode_path / "episode_manifest.json").read_text(encoding="utf-8"))
     assert tuple(item["actor"] for item in source_manifest["sequences"]) == (0, 1)
     assert all(item["episode_start_ordinal"] == 0 for item in source_manifest["sequences"])
+
+    training_episode = LegacyTrainingTrajectoryReader(episode_path).read_episode()
+    assert training_episode.episode_id == episode.manifest.episode_id
+    assert training_episode.outcome == episode.manifest.outcome
+    assert len(training_episode.steps) == len(episode.records)
+    assert not hasattr(training_episode.steps[0], "episode_context_ref")
+    assert not hasattr(training_episode.steps[0], "validation")
+    assert not hasattr(training_episode.steps[0], "fingerprints")
+    serialized_training = json.dumps(training_episode.to_dict(), sort_keys=True)
+    for forbidden in ("deck0", "deck1", "episode_context_ref", "validation", "fingerprints"):
+        assert forbidden not in serialized_training

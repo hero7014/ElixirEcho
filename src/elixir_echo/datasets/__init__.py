@@ -9,7 +9,9 @@ from .trajectory import (
     TrajectoryReader,
     TrajectoryWriter,
     aggregate_record_hash,
+    project_training_episode,
 )
+from .legacy import LegacyTrainingTrajectoryReader, LegacyTrajectoryReader
 
 __all__ = [
     "TrainingEpisode",
@@ -20,4 +22,7 @@ __all__ = [
     "TrajectoryReader",
     "TrajectoryWriter",
     "aggregate_record_hash",
+    "project_training_episode",
+    "LegacyTrainingTrajectoryReader",
+    "LegacyTrajectoryReader",
 ]

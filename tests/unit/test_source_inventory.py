@@ -89,6 +89,7 @@ def test_manifest_is_deterministic_and_contains_only_checkpoint_metadata(
 
     assert first == second
     assert payload["schema"] == "elixir_echo.source_inventory@1"
+    assert payload["source_alias"] == "validated-research-baseline"
     assert payload["formal_checkpoint"] == checkpoint
     assert "private model bytes" not in first
     assert str(root.resolve()) not in first

@@ -10,8 +10,16 @@ from elixir_echo.domain import Observation
 
 
 class ObservationProfile(str, Enum):
-    """Stable public names for the two initial observation selections."""
+    """Stable public names for the two observation selections.
 
+    ``CORE`` and ``FULL`` remain aliases for compatibility with existing
+    configs and fingerprints; the canonical concepts are ``MIN`` and ``RICH``.
+    The serialized values stay ``core`` and ``full`` to avoid invalidating
+    existing artifacts.
+    """
+
+    MIN = "core"
+    RICH = "full"
     CORE = "core"
     FULL = "full"
 
@@ -92,7 +100,7 @@ def select_observation(
 
     profile = ObservationProfile(profile)
     payload = observation.to_dict()
-    full = profile is ObservationProfile.FULL
+    full = profile is ObservationProfile.RICH
     return {
         "profile": profile.value,
         "observation_schema": payload["schema"],

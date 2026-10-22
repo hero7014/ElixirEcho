@@ -1,36 +1,26 @@
-# ElixirEcho migration map
+# Implementation and verification map
 
-This repository is extracted from the validated local research workspace known as
-`legacy_source`. The legacy workspace remains the read-only behavioral oracle during
-migration and is not copied wholesale into this repository.
+This file summarizes the extracted ElixirEcho implementation and its compatibility
+evidence. It is a project map, not a record of private conversations or a claim that the
+independent-policy research goal is complete.
 
-## Baseline scope
-
-The immutable inventory covers publishable candidates from four source areas:
-
-- `src/`: implementation modules;
-- `tests/`: executable behavior and regression evidence;
-- `tools/`: reproducible command-line workflows;
-- `adb/`: two legacy device-inspection utilities retained for migration audit;
-- `docs/`: approved technical specifications, plans, and audit notes.
-
-Generated caches, replay datasets, checkpoints, logs, secrets, virtual environments,
-game resources, and local executables are excluded. The formal checkpoint is represented
-only by its identity, byte size, SHA-256 digest, and training-report digest.
-
-## Migration order
-
-| Legacy area | ElixirEcho destination | Compatibility gate |
+| Area | ElixirEcho module | Verification boundary |
 | --- | --- | --- |
-| Semantic contracts | `elixir_echo.domain` | Domain parity |
-| Observation profiles | `elixir_echo.profiles` | Field-selection parity |
-| FirstLight adapters | `elixir_echo.integrations.firstlight` | Read-only and tensor parity |
-| Full-episode cache | `elixir_echo.datasets` | Hash and reader-boundary parity |
-| History and tracker | `elixir_echo.temporal` | Causality and leakage tests |
-| Recurrent policy boundary | `elixir_echo.policies` | Logit and recurrent-reset parity |
-| Sequence compilation and IL | `elixir_echo.training` | Training-smoke parity |
-| Operational scripts | `elixir_echo.cli` | Clean-clone CLI tests |
+| Game-agent contracts | `elixir_echo.domain` | Identity, validation, and serialization tests |
+| Observation selection | `elixir_echo.profiles` | `ObservationProfile.MIN/RICH` field-selection tests |
+| FirstLight boundary | `elixir_echo.integrations.firstlight` | Read-only import, tensor and checkpoint-output checks |
+| Episode dataset | `elixir_echo.datasets` | Atomic write, hashes, ordering, and deck-free reader tests |
+| Public temporal context | `elixir_echo.temporal` | Causality, reset, and leakage tests |
+| Policy interface | `elixir_echo.policies` | Recurrent-state identity and reset tests |
+| Imitation-learning path | `elixir_echo.training` | Sequence/label checks and optional in-memory smoke |
+| Local operations | `elixir_echo.cli` | Clean-install help and trajectory-cache verification |
 
-The detailed public rename map and ownership boundaries are defined in the approved
-repository design. FirstLight remains an attributed external integration rather than
-vendored project code.
+The FirstLight adapter loads provider code from a user-configured checkout rather than
+copying its implementation into this repository. The current policy integration is a
+reusable compatibility baseline; it is not evidence of a new, independently trained
+policy. Normal tests and CLI commands do not start model training.
+
+`source-inventory.json` is a byte-level inventory from the earlier validated local
+research workspace used during extraction. It excludes generated caches, replay data,
+checkpoints, secrets, and local paths. It is historical migration evidence, not a
+license grant or an inventory of the current ElixirEcho files.

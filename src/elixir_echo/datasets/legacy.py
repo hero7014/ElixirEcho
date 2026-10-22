@@ -10,7 +10,13 @@ from typing import Any
 
 from elixir_echo.domain import ActionMask, DecisionIdentity, DecisionStep, ExpertAction, Observation
 from elixir_echo.domain.values import content_sha256
-from .trajectory import TrajectoryEpisode, TrajectoryManifest, aggregate_record_hash
+from .trajectory import (
+    TrainingEpisode,
+    TrajectoryEpisode,
+    TrajectoryManifest,
+    aggregate_record_hash,
+    project_training_episode,
+)
 
 
 LEGACY_EPISODE_ENV = "ELIXIR_ECHO_LEGACY_EPISODE"
@@ -150,3 +156,13 @@ class LegacyTrajectoryReader:
             split=str(manifest_payload["split"]),
         )
         return TrajectoryEpisode(new_manifest, tuple(records), metadata)
+
+
+class LegacyTrainingTrajectoryReader:
+    """Expose a verified legacy episode through the deck-free training view."""
+
+    def __init__(self, episode_path: str | Path | None = None) -> None:
+        self._reader = LegacyTrajectoryReader(episode_path)
+
+    def read_episode(self) -> TrainingEpisode:
+        return project_training_episode(self._reader.read_episode())

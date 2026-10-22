@@ -99,9 +99,18 @@ def observation() -> Observation:
     )
 
 
+def test_min_rich_are_canonical_names_with_core_full_compatibility_aliases() -> None:
+    assert ObservationProfile.MIN.name == "MIN"
+    assert ObservationProfile.RICH.name == "RICH"
+    assert ObservationProfile.CORE is ObservationProfile.MIN
+    assert ObservationProfile.FULL is ObservationProfile.RICH
+    assert ObservationProfile.MIN.value == "core"
+    assert ObservationProfile.RICH.value == "full"
+
+
 def test_core_is_combat_complete_and_full_is_strictly_additive() -> None:
-    core = select_observation(observation(), ObservationProfile.CORE)
-    full = select_observation(observation(), ObservationProfile.FULL)
+    core = select_observation(observation(), ObservationProfile.MIN)
+    full = select_observation(observation(), ObservationProfile.RICH)
 
     assert core["players"][0]["self_private"]["hand"] == [1, 2, 3, 4]
     assert "tower_troop_id" in core["towers"][0]
@@ -114,10 +123,10 @@ def test_core_is_combat_complete_and_full_is_strictly_additive() -> None:
 
 
 def test_core_player_runtime_is_coarse_and_full_is_detailed() -> None:
-    core_player = select_observation(observation(), ObservationProfile.CORE)[
+    core_player = select_observation(observation(), ObservationProfile.MIN)[
         "players"
     ][0]
-    full_player = select_observation(observation(), ObservationProfile.FULL)[
+    full_player = select_observation(observation(), ObservationProfile.RICH)[
         "players"
     ][0]
 
@@ -133,7 +142,7 @@ def test_core_player_runtime_is_coarse_and_full_is_detailed() -> None:
 
 
 def test_full_relations_exclude_provider_temporary_handles() -> None:
-    relation = select_observation(observation(), ObservationProfile.FULL)["entities"][
+    relation = select_observation(observation(), ObservationProfile.RICH)["entities"][
         0
     ]["causal_relation"]
 

@@ -143,7 +143,7 @@ def render_inventory_manifest(
     counts = Counter(entry.classification for entry in ordered)
     payload = {
         "schema": INVENTORY_SCHEMA,
-        "source_alias": "legacy_source",
+        "source_alias": "validated-research-baseline",
         "entry_count": len(ordered),
         "classification_counts": dict(sorted(counts.items())),
         "aggregate_sha256": _aggregate_sha256(ordered),
