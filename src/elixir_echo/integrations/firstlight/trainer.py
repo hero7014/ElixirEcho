@@ -3,8 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+import hashlib
+import json
 import math
+import os
 from collections.abc import Iterable
+from pathlib import Path
+import shutil
+import tempfile
 from typing import Any
 
 from elixir_echo.datasets.trajectory import TrainingEpisode
@@ -12,6 +18,10 @@ from elixir_echo.integrations.firstlight.il import compile_firstlight_actor_sequ
 from elixir_echo.integrations.firstlight.policy import FirstLightPolicyBackend
 from elixir_echo.training.config import TrainingConfig
 from elixir_echo.training.sequence import CompiledActorSequence
+
+
+_CHECKPOINT_MANIFEST_SCHEMA = "elixir_echo.training-checkpoint@1"
+_CHECKPOINT_WEIGHTS_NAME = "firstlight-v4.pt"
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,6 +70,16 @@ class TrainingPassResult:
 
 
 @dataclass(frozen=True, slots=True)
+class TrainingCheckpointRef:
+    """Identity and compatibility metadata for a saved training checkpoint."""
+
+    checkpoint_id: str
+    path: Path
+    update_step: int
+    training_config_fingerprint: str
+
+
+@dataclass(frozen=True, slots=True)
 class GuardedILLoss:
     """FirstLight IL losses computed under explicit per-head supervision masks."""
 
@@ -87,6 +107,185 @@ class FirstLightILTrainer:
         self.config = config
         self._imitation = backend.runtime.import_module("native_runner.training.v4.imitation")
         self._learning = backend.runtime.import_module("native_runner.training.v4.learning")
+
+    @staticmethod
+    def _sha256(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    @staticmethod
+    def _json_value(value: Any) -> Any:
+        """Normalize provider contracts to the exact representation JSON stores."""
+
+        return json.loads(json.dumps(value, sort_keys=True))
+
+    @staticmethod
+    def _read_checkpoint_payload(path: Path) -> dict[str, Any]:
+        """Read provider metadata on CPU without mutating live model state."""
+
+        import torch
+
+        payload = torch.load(path, map_location="cpu", weights_only=False)
+        if not isinstance(payload, dict):
+            raise ValueError("FirstLight checkpoint payload is invalid")
+        return payload
+
+    def save_checkpoint(
+        self,
+        path: str | Path,
+        *,
+        optimizer: Any | None = None,
+        update_step: int,
+    ) -> TrainingCheckpointRef:
+        """Atomically save FirstLight V4 weights with an ElixirEcho run contract.
+
+        Checkpoints are immutable directories so the provider file and the
+        compatibility manifest become visible together at the final rename.
+        """
+
+        if type(update_step) is not int or update_step < 0:
+            raise ValueError("update_step must be a non-negative integer")
+        destination = Path(path).expanduser().absolute()
+        if destination.name in {"", ".", ".."}:
+            raise ValueError("checkpoint path must name a new directory")
+        if destination.exists():
+            raise FileExistsError(destination)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+
+        checkpoint = self.backend.runtime.import_module("native_runner.training.v4.checkpoint")
+        provider_contract = self._json_value(checkpoint.checkpoint_contract(self.backend.model))
+        training_contract = {
+            "schema": _CHECKPOINT_MANIFEST_SCHEMA,
+            "training_config": self.config.to_dict(),
+            "training_config_fingerprint": self.config.fingerprint(),
+        }
+        staging = Path(
+            tempfile.mkdtemp(prefix=f".{destination.name}.", dir=destination.parent)
+        )
+        try:
+            weights_path = staging / _CHECKPOINT_WEIGHTS_NAME
+            checkpoint_id = checkpoint.save_actor_critic_checkpoint(
+                weights_path,
+                self.backend.model,
+                optimizer=optimizer,
+                update_step=update_step,
+                training_stage="elixir_echo_imitation_learning",
+                gamma_per_decision=1.0,
+                extra={"elixir_echo": training_contract},
+            )
+            manifest = {
+                **training_contract,
+                "checkpoint_id": checkpoint_id,
+                "update_step": update_step,
+                "provider_contract": provider_contract,
+                "weights_file": _CHECKPOINT_WEIGHTS_NAME,
+                "checkpoint_sha256": self._sha256(weights_path),
+            }
+            (staging / "manifest.json").write_text(
+                json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+                encoding="utf-8",
+                newline="",
+            )
+            os.rename(staging, destination)
+        except BaseException:
+            if staging.exists():
+                shutil.rmtree(staging)
+            raise
+        return TrainingCheckpointRef(
+            checkpoint_id=str(checkpoint_id),
+            path=destination,
+            update_step=update_step,
+            training_config_fingerprint=self.config.fingerprint(),
+        )
+
+    def restore_checkpoint(
+        self,
+        path: str | Path,
+        *,
+        optimizer: Any | None = None,
+        restore_rng: bool = True,
+    ) -> TrainingCheckpointRef:
+        """Validate config, provider contract, and file hash before restoring."""
+
+        source = Path(path).expanduser().absolute()
+        manifest_path = source / "manifest.json"
+        weights_path = source / _CHECKPOINT_WEIGHTS_NAME
+        if not source.is_dir() or not manifest_path.is_file() or not weights_path.is_file():
+            raise ValueError("training checkpoint directory is incomplete")
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise ValueError("training checkpoint manifest is unreadable") from error
+        if manifest.get("schema") != _CHECKPOINT_MANIFEST_SCHEMA:
+            raise ValueError("unsupported ElixirEcho training checkpoint schema")
+        if manifest.get("weights_file") != _CHECKPOINT_WEIGHTS_NAME:
+            raise ValueError("training checkpoint weights path is invalid")
+        if manifest.get("training_config_fingerprint") != self.config.fingerprint():
+            raise ValueError("training configuration fingerprint does not match checkpoint")
+        if manifest.get("training_config") != self.config.to_dict():
+            raise ValueError("training configuration payload does not match checkpoint")
+        update_step = manifest.get("update_step")
+        if type(update_step) is not int or update_step < 0:
+            raise ValueError("training checkpoint update_step is invalid")
+
+        checkpoint = self.backend.runtime.import_module("native_runner.training.v4.checkpoint")
+        expected_provider_contract = self._json_value(
+            checkpoint.checkpoint_contract(self.backend.model)
+        )
+        if manifest.get("provider_contract") != expected_provider_contract:
+            raise ValueError("FirstLight provider/model contract does not match checkpoint")
+        if manifest.get("checkpoint_sha256") != self._sha256(weights_path):
+            raise ValueError("training checkpoint file hash mismatch")
+
+        # FirstLight's loader mutates the model and optimizer before returning
+        # checkpoint metadata. Preflight identity/config fields first so a
+        # mismatched manifest cannot leave partially restored live state.
+        preflight = self._read_checkpoint_payload(weights_path)
+        if preflight.get("schema") != checkpoint.CHECKPOINT_SCHEMA_V4:
+            raise ValueError("unsupported FirstLight V4 checkpoint schema")
+        if preflight.get("contract") != checkpoint.checkpoint_contract(self.backend.model):
+            raise ValueError("FirstLight checkpoint model/catalog contract does not match")
+        if preflight.get("checkpoint_id") != manifest.get("checkpoint_id"):
+            raise ValueError("FirstLight checkpoint identity does not match manifest")
+        if preflight.get("update_step") != update_step:
+            raise ValueError("FirstLight checkpoint update_step does not match manifest")
+        embedded_contract = preflight.get("extra", {}).get("elixir_echo", {})
+        if embedded_contract != {
+            "schema": _CHECKPOINT_MANIFEST_SCHEMA,
+            "training_config": self.config.to_dict(),
+            "training_config_fingerprint": self.config.fingerprint(),
+        }:
+            raise ValueError("FirstLight checkpoint metadata does not match manifest")
+
+        payload = checkpoint.load_actor_critic_checkpoint(
+            weights_path,
+            self.backend.model,
+            optimizer=optimizer,
+            # Keep the CPU RNG ByteTensor on CPU; FirstLight restores it with
+            # torch.set_rng_state before any device-specific RNG state.
+            map_location="cpu",
+            restore_rng=restore_rng,
+        )
+        embedded_contract = payload.get("extra", {}).get("elixir_echo", {})
+        if embedded_contract != {
+            "schema": _CHECKPOINT_MANIFEST_SCHEMA,
+            "training_config": self.config.to_dict(),
+            "training_config_fingerprint": self.config.fingerprint(),
+        }:
+            raise ValueError("FirstLight checkpoint metadata does not match manifest")
+        if payload.get("update_step") != update_step:
+            raise ValueError("FirstLight checkpoint update_step does not match manifest")
+        if payload.get("checkpoint_id") != manifest.get("checkpoint_id"):
+            raise ValueError("FirstLight checkpoint identity does not match manifest")
+        return TrainingCheckpointRef(
+            checkpoint_id=str(manifest["checkpoint_id"]),
+            path=source,
+            update_step=update_step,
+            training_config_fingerprint=self.config.fingerprint(),
+        )
 
     def _sequence(self, compiled: CompiledActorSequence) -> Any:
         import torch

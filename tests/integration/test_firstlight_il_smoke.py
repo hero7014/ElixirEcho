@@ -118,7 +118,7 @@ def _step(tick: int, actor: int, action) -> TrainingStep:
     os.environ.get("ELIXIR_ECHO_RUN_TRAINING_SMOKE") != "1",
     reason="set ELIXIR_ECHO_RUN_TRAINING_SMOKE=1 to opt in to one optimizer step",
 )
-def test_full_profile_sequence_runs_firstlight_v4_il_and_backprop_without_saving():
+def test_full_profile_sequence_runs_firstlight_v4_il_and_checkpoint_roundtrip(tmp_path):
     root = os.environ.get("ELIXIR_ECHO_FIRSTLIGHT_ROOT")
     if not root:
         pytest.skip("set ELIXIR_ECHO_FIRSTLIGHT_ROOT to run the FirstLight IL smoke")
@@ -156,7 +156,12 @@ def test_full_profile_sequence_runs_firstlight_v4_il_and_backprop_without_saving
 
     trainer = FirstLightILTrainer(backend, config)
     result = trainer.tiny_overfit(compiled, optimizer_steps=1)
-    recurrent_result = trainer.train_sequence(compiled)
+    optimizer = torch.optim.AdamW(
+        backend.model.parameters(),
+        lr=config.learning_rate,
+        weight_decay=config.weight_decay,
+    )
+    recurrent_result = trainer.train_sequence(compiled, optimizer=optimizer)
 
     assert result.sequence_shape == (2, 1)
     assert result.profile == "full"
@@ -175,3 +180,22 @@ def test_full_profile_sequence_runs_firstlight_v4_il_and_backprop_without_saving
     assert recurrent_result.tbptt_length == 1
     assert all(math.isfinite(item) for item in recurrent_result.loss_history)
     assert all(math.isfinite(item) for item in recurrent_result.gradient_norms)
+    expected_parameters = torch.nn.utils.parameters_to_vector(backend.model.parameters()).detach().clone()
+    optimizer_state_count = len(optimizer.state)
+    checkpoint_path = tmp_path / "synthetic-checkpoint"
+    saved = trainer.save_checkpoint(
+        checkpoint_path,
+        optimizer=optimizer,
+        update_step=recurrent_result.optimizer_steps,
+    )
+    with torch.no_grad():
+        next(backend.model.parameters()).add_(1.0)
+    optimizer.state.clear()
+
+    restored = trainer.restore_checkpoint(checkpoint_path, optimizer=optimizer)
+
+    actual_parameters = torch.nn.utils.parameters_to_vector(backend.model.parameters()).detach()
+    assert torch.equal(actual_parameters, expected_parameters)
+    assert len(optimizer.state) == optimizer_state_count
+    assert saved.checkpoint_id == restored.checkpoint_id
+    assert restored.update_step == recurrent_result.optimizer_steps
