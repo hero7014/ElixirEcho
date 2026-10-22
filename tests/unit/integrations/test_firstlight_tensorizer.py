@@ -104,6 +104,20 @@ def test_rich_hero_active_form_and_attack_charge_fields_reach_v4(runtime) -> Non
     assert decision.batch.groups.child_features[0, 0, 23].item() == pytest.approx(0.5)
 
 
+def test_numeric_shield_hitpoints_reach_tower_entity_and_spatial_features(runtime) -> None:
+    tensorizer = ObservationTensorizer(runtime)
+    profile = _profile(rich=False)
+    profile["towers"][0]["shield"] = {"hitpoints": 384.0}
+    profile["entities"][0]["shield"] = {"hitpoints": 384.0}
+
+    decision = tensorizer.tensorize(profile, actor=0, action_mask=_mask())
+
+    assert decision.batch.towers.features[0, 0, 1].item() == pytest.approx(384 / 4_000)
+    assert decision.batch.groups.features[0, 0, 3].item() == pytest.approx(384 / 10_000)
+    assert decision.batch.groups.child_features[0, 0, 3].item() == pytest.approx(384 / 10_000)
+    assert decision.batch.explicit_spatial_planes[0, 5].sum().item() == pytest.approx(384 / 10_000)
+
+
 @pytest.mark.parametrize(
     "action",
     [

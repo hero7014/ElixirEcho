@@ -69,6 +69,14 @@ def _known(value: Any) -> Any:
     return data.get("value") if data.get("status") == "known" else None
 
 
+def _known_or_raw(value: Any) -> Any:
+    """Unwrap known semantic values while preserving legacy raw scalar fields."""
+
+    if isinstance(value, Mapping) and "status" in value:
+        return value.get("value") if value.get("status") == "known" else None
+    return value
+
+
 def _number(value: Any, scale: float = 1.0) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return 0.0
@@ -229,7 +237,8 @@ class ObservationTensorizer:
             troop[0, row] = 0 if troop_id is None else self.TOWER_TROOPS.get(int(troop_id), 0)
             owner[0, row] = self._owner(tower.get("owner"), actor)
             features[0, row, 0] = _number(hp, float(max_hp or 1.0))
-            features[0, row, 1] = _number(_known(shield.get("hitpoints", shield)), float(max_hp or 1.0))
+            shield_hp = _known_or_raw(shield.get("hitpoints", shield))
+            features[0, row, 1] = _number(shield_hp, float(max_hp or 1.0))
             features[0, row, 2] = float(tower.get("active") is True)
             attack = _mapping(tower.get("attack"))
             features[0, row, 3] = float(attack.get("target_entity") is not None)
@@ -292,7 +301,7 @@ class ObservationTensorizer:
             xy = self._tile(entity["position"], actor)
             hp, max_hp = entity.get("hitpoints"), entity.get("max_hitpoints")
             shield = _mapping(entity.get("shield"))
-            shield_hp = _known(shield.get("hitpoints", shield))
+            shield_hp = _known_or_raw(shield.get("hitpoints", shield))
             group_features[0, row, 0] = 1 / 16
             group_features[0, row, 2] = _number(hp, 10_000)
             group_features[0, row, 3] = _number(shield_hp, 10_000)
@@ -686,7 +695,10 @@ class ObservationTensorizer:
             category = 3 if kind == "projectile" else 2 if kind == "building" else 0
             spatial[0, base + category, y, x] += 1.0
             spatial[0, base + 4, y, x] += _number(entity.get("hitpoints"), 10_000)
-            spatial[0, base + 5, y, x] += _number(_known(_mapping(entity.get("shield")).get("hitpoints")), 10_000)
+            shield_hp = _known_or_raw(
+                _mapping(entity.get("shield")).get("hitpoints")
+            )
+            spatial[0, base + 5, y, x] += _number(shield_hp, 10_000)
         batch = self.types.UniversalSemanticBatchV4(
             match_scalars=scalars, own_cards=own, opponent_cards=opponent, towers=towers, groups=groups,
             active_effects=effects, events=events, relation_edges=relations, explicit_spatial_planes=spatial,
