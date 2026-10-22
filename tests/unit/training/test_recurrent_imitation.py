@@ -78,7 +78,7 @@ def test_firstlight_loss_applies_each_explicit_head_mask_before_provider_loss():
     trainer.backend = SimpleNamespace(model=object())
     trainer._learning = SimpleNamespace(
         evaluate_recurrent_sequence=lambda *_args, **_kwargs: SimpleNamespace(
-            value=torch.zeros((3, 1)), log_prob=torch.zeros((3, 1))
+            value=torch.zeros((3, 1)), log_prob=torch.zeros((3, 1)), final_state=None
         )
     )
     trainer._imitation = SimpleNamespace(
@@ -119,3 +119,64 @@ def test_firstlight_loss_applies_each_explicit_head_mask_before_provider_loss():
     assert result.delay_count == 0
     assert result.continue_count == 1
     assert result.value_count == 0
+
+
+def test_tbptt_carries_only_detached_state_across_ordered_chunks_and_starts_empty():
+    class Model(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.tensor(1.0))
+
+    observations = tuple(f"frame-{index}" for index in range(5))
+    sequence = FakeSequence(
+        observations=observations,
+        actions=tuple(f"action-{index}" for index in range(5)),
+        episode_start=torch.tensor([[True], [False], [False], [False], [False]]),
+        valid_mask=torch.ones((5, 1), dtype=torch.bool),
+        returns=torch.zeros((5, 1)),
+        gate_loss_mask=torch.ones((5, 1), dtype=torch.bool),
+        value_loss_mask=torch.zeros((5, 1), dtype=torch.bool),
+        sequence_id="episode:actor-0",
+    )
+    labels = tuple(_label(LabelCategory.WAIT, HeadSupervision(gate=True)) for _ in observations)
+    trainer = object.__new__(FirstLightILTrainer)
+    trainer.config = TrainingConfig(tbptt_length=2)
+    trainer.backend = SimpleNamespace(model=Model())
+    trainer._sequence = lambda _compiled: sequence
+    seen = []
+
+    def fake_loss(chunk, chunk_labels, *, initial_state=None):
+        seen.append((chunk.observations, chunk.actions, chunk_labels, chunk.episode_start.clone(), initial_state))
+        if initial_state is None:
+            final_state = trainer.backend.model.weight.reshape(1)
+        else:
+            final_state = initial_state + 1
+        return SimpleNamespace(total=trainer.backend.model.weight.square(), final_state=final_state)
+
+    trainer._loss = fake_loss
+    compiled = SimpleNamespace(episode_id="episode", actor=0, labels=labels)
+
+    result = trainer.train_sequence(compiled)
+
+    assert result.chunks == result.optimizer_steps == 3
+    assert result.tbptt_length == 2
+    assert [item[0] for item in seen] == [
+        ("frame-0", "frame-1"),
+        ("frame-2", "frame-3"),
+        ("frame-4",),
+    ]
+    assert [item[1] for item in seen] == [
+        ("action-0", "action-1"),
+        ("action-2", "action-3"),
+        ("action-4",),
+    ]
+    assert seen[0][2] == labels[:2]
+    assert seen[1][2] == labels[2:4]
+    assert seen[2][2] == labels[4:]
+    assert seen[0][3].tolist() == [[True], [False]]
+    assert seen[1][3].tolist() == [[False], [False]]
+    assert seen[2][3].tolist() == [[False]]
+    assert seen[0][4] is None  # each actor episode resets
+    assert seen[1][4] is not None and not seen[1][4].requires_grad
+    assert seen[2][4] is not None and not seen[2][4].requires_grad
+    assert len(result.loss_history) == len(result.gradient_norms) == 3

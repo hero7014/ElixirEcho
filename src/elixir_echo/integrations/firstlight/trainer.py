@@ -29,6 +29,19 @@ class TinyOverfitResult:
 
 
 @dataclass(frozen=True, slots=True)
+class RecurrentSequenceTrainResult:
+    """Metrics for one actor episode optimized with truncated BPTT."""
+
+    episode_id: str
+    actor: int
+    tbptt_length: int
+    chunks: int
+    optimizer_steps: int
+    loss_history: tuple[float, ...]
+    gradient_norms: tuple[float, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class GuardedILLoss:
     """FirstLight IL losses computed under explicit per-head supervision masks."""
 
@@ -45,6 +58,7 @@ class GuardedILLoss:
     delay_count: int
     continue_count: int
     value_count: int
+    final_state: Any
 
 
 class FirstLightILTrainer:
@@ -91,7 +105,13 @@ class FirstLightILTrainer:
         sequence.validate()
         return sequence
 
-    def _loss(self, sequence: Any, labels: tuple[Any, ...]) -> GuardedILLoss:
+    def _loss(
+        self,
+        sequence: Any,
+        labels: tuple[Any, ...],
+        *,
+        initial_state: Any = None,
+    ) -> GuardedILLoss:
         import torch
 
         if len(labels) != sequence.valid_mask.shape[0]:
@@ -109,6 +129,7 @@ class FirstLightILTrainer:
             sequence.observations,
             sequence.actions,
             sequence.episode_start,
+            initial_state=initial_state,
             validate=True,
         )
         heads = ("gate", "candidate", "target", "delay", "continue_action", "value")
@@ -157,6 +178,106 @@ class FirstLightILTrainer:
             delay_count=counts["delay"],
             continue_count=counts["continue_action"],
             value_count=counts["value"],
+            final_state=evaluation.final_state,
+        )
+
+    @staticmethod
+    def _slice_sequence(sequence: Any, start: int, stop: int) -> Any:
+        """Slice every time-aligned V4 sequence field without crossing actors."""
+
+        return replace(
+            sequence,
+            observations=sequence.observations[start:stop],
+            actions=sequence.actions[start:stop],
+            episode_start=sequence.episode_start[start:stop],
+            valid_mask=sequence.valid_mask[start:stop],
+            returns=sequence.returns[start:stop],
+            gate_loss_mask=sequence.gate_loss_mask[start:stop],
+            value_loss_mask=sequence.value_loss_mask[start:stop],
+        )
+
+    @staticmethod
+    def _detach_state(state: Any) -> Any:
+        """Detach provider recurrent state recursively at a TBPTT boundary."""
+
+        if hasattr(state, "detach"):
+            return state.detach()
+        if isinstance(state, tuple):
+            return tuple(FirstLightILTrainer._detach_state(item) for item in state)
+        if isinstance(state, list):
+            return [FirstLightILTrainer._detach_state(item) for item in state]
+        if isinstance(state, dict):
+            return {key: FirstLightILTrainer._detach_state(value) for key, value in state.items()}
+        return state
+
+    def train_sequence(
+        self,
+        compiled: CompiledActorSequence,
+        *,
+        optimizer: Any | None = None,
+    ) -> RecurrentSequenceTrainResult:
+        """Optimize one actor episode in fixed-size TBPTT chunks.
+
+        Recurrent values flow forward within the episode, while their gradients
+        stop at each chunk boundary. Every call starts with no prior episode
+        state, so state cannot leak between replay/actor sequences.
+        """
+
+        import torch
+
+        sequence = self._sequence(compiled)
+        model = self.backend.model
+        optimizer = optimizer or torch.optim.AdamW(
+            model.parameters(),
+            lr=self.config.learning_rate,
+            weight_decay=self.config.weight_decay,
+        )
+        was_training = model.training
+        model.train(True)
+        total_steps = len(sequence.observations)
+        chunks = 0
+        losses: list[float] = []
+        gradient_norms: list[float] = []
+        recurrent_state = None
+        try:
+            for start in range(0, total_steps, self.config.tbptt_length):
+                stop = min(start + self.config.tbptt_length, total_steps)
+                chunk = self._slice_sequence(sequence, start, stop)
+                chunk_labels = compiled.labels[start:stop]
+                optimizer.zero_grad(set_to_none=True)
+                result = self._loss(
+                    chunk,
+                    chunk_labels,
+                    initial_state=recurrent_state,
+                )
+                loss_value = float(result.total.detach().cpu())
+                if not math.isfinite(loss_value):
+                    raise FloatingPointError("non-finite FirstLight V4 IL loss")
+                result.total.backward()
+                gradient_norm = torch.nn.utils.clip_grad_norm_(
+                    model.parameters(),
+                    self.config.max_grad_norm,
+                    error_if_nonfinite=True,
+                )
+                gradient_value = float(gradient_norm.detach().cpu())
+                if not math.isfinite(gradient_value):
+                    raise FloatingPointError("non-finite FirstLight V4 gradient norm")
+                optimizer.step()
+                losses.append(loss_value)
+                gradient_norms.append(gradient_value)
+                chunks += 1
+                recurrent_state = self._detach_state(result.final_state)
+        finally:
+            model.train(was_training)
+
+        return RecurrentSequenceTrainResult(
+            episode_id=compiled.episode_id,
+            actor=compiled.actor,
+            tbptt_length=self.config.tbptt_length,
+            chunks=chunks,
+            optimizer_steps=chunks,
+            loss_history=tuple(losses),
+            gradient_norms=tuple(gradient_norms),
         )
 
     def tiny_overfit(

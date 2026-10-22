@@ -125,7 +125,7 @@ def test_full_profile_sequence_runs_firstlight_v4_il_and_backprop_without_saving
     device = "cuda" if torch.cuda.is_available() else "cpu"
     runtime = FirstLightRuntime(root)
     backend = FirstLightPolicyBackend(runtime, device=device)
-    config = TrainingConfig(profile=ObservationProfile.RICH)
+    config = TrainingConfig(profile=ObservationProfile.RICH, tbptt_length=1)
     play = {
         "kind": "play_card",
         "owner": 0,
@@ -154,7 +154,9 @@ def test_full_profile_sequence_runs_firstlight_v4_il_and_backprop_without_saving
         config=config,
     )
 
-    result = FirstLightILTrainer(backend, config).tiny_overfit(compiled, optimizer_steps=1)
+    trainer = FirstLightILTrainer(backend, config)
+    result = trainer.tiny_overfit(compiled, optimizer_steps=1)
+    recurrent_result = trainer.train_sequence(compiled)
 
     assert result.sequence_shape == (2, 1)
     assert result.profile == "full"
@@ -169,3 +171,7 @@ def test_full_profile_sequence_runs_firstlight_v4_il_and_backprop_without_saving
     assert result.head_counts["continue_action"] == 1
     assert result.head_counts["delay"] == 0
     assert result.head_counts["value"] == 0
+    assert recurrent_result.chunks == recurrent_result.optimizer_steps == 2
+    assert recurrent_result.tbptt_length == 1
+    assert all(math.isfinite(item) for item in recurrent_result.loss_history)
+    assert all(math.isfinite(item) for item in recurrent_result.gradient_norms)

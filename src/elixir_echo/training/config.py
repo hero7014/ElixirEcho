@@ -31,6 +31,7 @@ class TrainingConfig:
     learning_rate: float = 3e-5
     weight_decay: float = 1e-2
     max_grad_norm: float = 1.0
+    tbptt_length: int = 32
     optimizer_name: str = "adamw"
 
     def __post_init__(self) -> None:
@@ -61,6 +62,8 @@ class TrainingConfig:
                 raise ValueError(f"{name} must be finite and non-negative")
         if self.gate_act_weight <= 0 or self.learning_rate <= 0 or self.max_grad_norm <= 0:
             raise ValueError("gate_act_weight, learning_rate, and max_grad_norm must be positive")
+        if type(self.tbptt_length) is not int or self.tbptt_length <= 0:
+            raise ValueError("tbptt_length must be a positive integer")
         if self.delay_loss_weight != 0.0 or self.value_loss_weight != 0.0:
             raise ValueError("delay and value losses are disabled in the first training pass")
         if self.delay_neighbor_weight > 1.0 / 3.0:
@@ -93,6 +96,7 @@ class TrainingConfig:
                 "weight_decay": float(self.weight_decay),
             },
             "max_grad_norm": float(self.max_grad_norm),
+            "tbptt_length": self.tbptt_length,
         }
 
     def fingerprint(self) -> str:
