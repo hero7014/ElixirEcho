@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 from typing import Any
 
@@ -26,6 +26,25 @@ class TinyOverfitResult:
     weighted_head_losses: dict[str, float]
     head_counts: dict[str, int]
     last_gradient_norm: float
+
+
+@dataclass(frozen=True, slots=True)
+class GuardedILLoss:
+    """FirstLight IL losses computed under explicit per-head supervision masks."""
+
+    total: Any
+    gate: Any
+    candidate: Any
+    target: Any
+    delay: Any
+    continue_action: Any
+    value: Any
+    gate_count: int
+    candidate_count: int
+    target_count: int
+    delay_count: int
+    continue_count: int
+    value_count: int
 
 
 class FirstLightILTrainer:
@@ -72,7 +91,11 @@ class FirstLightILTrainer:
         sequence.validate()
         return sequence
 
-    def _loss(self, sequence: Any) -> Any:
+    def _loss(self, sequence: Any, labels: tuple[Any, ...]) -> GuardedILLoss:
+        import torch
+
+        if len(labels) != sequence.valid_mask.shape[0]:
+            raise ValueError("label and recurrent sequence lengths differ")
         weights = self._imitation.ILLossWeightsV4(
             gate=self.config.gate_loss_weight,
             candidate=self.config.candidate_loss_weight,
@@ -88,14 +111,53 @@ class FirstLightILTrainer:
             sequence.episode_start,
             validate=True,
         )
-        result = self._imitation.imitation_loss(
-            sequence,
-            evaluation,
-            weights=weights,
-            gate_act_weight=self.config.gate_act_weight,
-            delay_neighbor_weight=self.config.delay_neighbor_weight,
+        heads = ("gate", "candidate", "target", "delay", "continue_action", "value")
+        losses: dict[str, Any] = {}
+        counts: dict[str, int] = {}
+        total = evaluation.value.sum() * 0.0
+        for head in heads:
+            mask = torch.tensor(
+                [[bool(getattr(item.supervision, head))] for item in labels],
+                dtype=torch.bool,
+                device=sequence.valid_mask.device,
+            )
+            mask = mask & sequence.valid_mask
+            head_sequence = replace(
+                sequence,
+                valid_mask=mask,
+                gate_loss_mask=mask,
+                value_loss_mask=mask,
+            )
+            head_weights = self._imitation.ILLossWeightsV4(
+                **{name: float(getattr(weights, name)) if name == head else 0.0 for name in heads}
+            )
+            result = self._imitation.imitation_loss(
+                head_sequence,
+                evaluation,
+                weights=head_weights,
+                gate_act_weight=self.config.gate_act_weight,
+                delay_neighbor_weight=self.config.delay_neighbor_weight,
+            )
+            loss_name = "continue_action" if head == "continue_action" else head
+            count_name = "continue_count" if head == "continue_action" else f"{head}_count"
+            losses[head] = getattr(result, loss_name)
+            counts[head] = int(getattr(result, count_name).detach().cpu())
+            total = total + result.total
+        return GuardedILLoss(
+            total=total,
+            gate=losses["gate"],
+            candidate=losses["candidate"],
+            target=losses["target"],
+            delay=losses["delay"],
+            continue_action=losses["continue_action"],
+            value=losses["value"],
+            gate_count=counts["gate"],
+            candidate_count=counts["candidate"],
+            target_count=counts["target"],
+            delay_count=counts["delay"],
+            continue_count=counts["continue_action"],
+            value_count=counts["value"],
         )
-        return result
 
     def tiny_overfit(
         self,
@@ -122,7 +184,7 @@ class FirstLightILTrainer:
         last_gradient_norm = 0.0
         final_loss = None
         try:
-            result = self._loss(sequence)
+            result = self._loss(sequence, compiled.labels)
             loss_history.append(float(result.total.detach().cpu()))
             for _ in range(optimizer_steps):
                 optimizer.zero_grad(set_to_none=True)
@@ -136,7 +198,7 @@ class FirstLightILTrainer:
                 if not math.isfinite(last_gradient_norm):
                     raise FloatingPointError("non-finite FirstLight V4 gradient norm")
                 optimizer.step()
-                result = self._loss(sequence)
+                result = self._loss(sequence, compiled.labels)
                 loss_value = float(result.total.detach().cpu())
                 if not math.isfinite(loss_value):
                     raise FloatingPointError("non-finite FirstLight V4 IL loss")
@@ -173,7 +235,7 @@ class FirstLightILTrainer:
         }
         head_counts = {
             name: (
-                int(getattr(final_loss, f"{name if name != 'continue_action' else 'continue'}_count").detach().cpu())
+                int(getattr(final_loss, f"{name if name != 'continue_action' else 'continue'}_count"))
                 if head_weights[name] > 0.0
                 else 0
             )
