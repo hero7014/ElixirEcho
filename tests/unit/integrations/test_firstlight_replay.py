@@ -82,6 +82,7 @@ def test_capture_is_continuous_actor_paired_and_labels_stay_after_current_input(
     assert captured.records[0].expert_action.actions[0]["kind"] == "play_card"
     assert "label-action-0" not in str(captured.records[0].observation.to_dict())
     assert "native_handle" not in str(captured.records[0].event_delta)
+    assert captured.records[2].event_delta == ({"tick": 95, "event_type": "public_tick_event"},)
     assert all(record.validation["label_leakage_asserted"] for record in captured.records)
 
 

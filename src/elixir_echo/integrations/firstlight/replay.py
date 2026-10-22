@@ -131,6 +131,11 @@ def _event_mapping(event: Any, actor: int) -> Mapping[str, Any]:
     return result
 
 
+def _event_tick(event: Any) -> int:
+    value = event.get("tick", -1) if isinstance(event, Mapping) else getattr(event, "tick", -1)
+    return int(value)
+
+
 def _sanitized_action(action: Any, *, decision_tick: int, source_tick: int) -> dict[str, Any]:
     raw = {
         "owner": getattr(action, "owner", None),
@@ -291,7 +296,7 @@ class FirstLightReplayProvider:
                 prior_tick = previous_by_actor[actor]
                 raw_events = tuple(
                     event for event in getattr(source, "events", ())
-                    if prior_tick < int(getattr(event, "tick", -1)) <= tick
+                    if prior_tick < _event_tick(event) <= tick
                 )
                 try:
                     event_delta = tuple(self.event_sanitizer(event, actor) for event in raw_events)
