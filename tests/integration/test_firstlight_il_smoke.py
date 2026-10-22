@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import math
 import os
 
@@ -13,7 +14,7 @@ from elixir_echo.integrations.firstlight.il import compile_firstlight_actor_sequ
 from elixir_echo.integrations.firstlight.policy import FirstLightPolicyBackend
 from elixir_echo.integrations.firstlight.runtime import FirstLightRuntime
 from elixir_echo.integrations.firstlight.tensorizer import PolicyInputBuilder
-from elixir_echo.integrations.firstlight.trainer import FirstLightILTrainer
+from elixir_echo.integrations.firstlight.trainer import FirstLightILTrainer, TrainingRunProgress
 from elixir_echo.profiles import ObservationProfile
 from elixir_echo.training.config import TrainingConfig
 
@@ -183,19 +184,37 @@ def test_full_profile_sequence_runs_firstlight_v4_il_and_checkpoint_roundtrip(tm
     expected_parameters = torch.nn.utils.parameters_to_vector(backend.model.parameters()).detach().clone()
     optimizer_state_count = len(optimizer.state)
     checkpoint_path = tmp_path / "synthetic-checkpoint"
+    episode_id_bytes = compiled.episode_id.encode("utf-8")
+    prefix_digest = hashlib.sha256(
+        bytes.fromhex(hashlib.sha256(b"").hexdigest())
+        + len(episode_id_bytes).to_bytes(8, "big")
+        + episode_id_bytes
+    ).hexdigest()
+    progress = TrainingRunProgress(
+        dataset_fingerprint="synthetic-cache-fingerprint",
+        completed_episode_count=1,
+        completed_episode_prefix_sha256=prefix_digest,
+        optimizer_steps=recurrent_result.optimizer_steps,
+    )
     saved = trainer.save_checkpoint(
         checkpoint_path,
         optimizer=optimizer,
         update_step=recurrent_result.optimizer_steps,
+        progress=progress,
     )
     with torch.no_grad():
         next(backend.model.parameters()).add_(1.0)
     optimizer.state.clear()
 
-    restored = trainer.restore_checkpoint(checkpoint_path, optimizer=optimizer)
+    restored = trainer.restore_checkpoint(
+        checkpoint_path,
+        optimizer=optimizer,
+        expected_dataset_fingerprint="synthetic-cache-fingerprint",
+    )
 
     actual_parameters = torch.nn.utils.parameters_to_vector(backend.model.parameters()).detach()
     assert torch.equal(actual_parameters, expected_parameters)
     assert len(optimizer.state) == optimizer_state_count
     assert saved.checkpoint_id == restored.checkpoint_id
     assert restored.update_step == recurrent_result.optimizer_steps
+    assert restored.progress == progress

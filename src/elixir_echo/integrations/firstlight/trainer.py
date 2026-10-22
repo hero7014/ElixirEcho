@@ -22,6 +22,16 @@ from elixir_echo.training.sequence import CompiledActorSequence
 
 _CHECKPOINT_MANIFEST_SCHEMA = "elixir_echo.training-checkpoint@1"
 _CHECKPOINT_WEIGHTS_NAME = "firstlight-v4.pt"
+_EMPTY_EPISODE_PREFIX_SHA256 = hashlib.sha256(b"").hexdigest()
+
+
+def _advance_episode_prefix_sha256(previous: str, episode_id: str) -> str:
+    encoded_id = episode_id.encode("utf-8")
+    digest = hashlib.sha256()
+    digest.update(bytes.fromhex(previous))
+    digest.update(len(encoded_id).to_bytes(8, "big"))
+    digest.update(encoded_id)
+    return digest.hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +80,54 @@ class TrainingPassResult:
 
 
 @dataclass(frozen=True, slots=True)
+class TrainingRunProgress:
+    """Dataset cursor persisted only at complete-episode boundaries."""
+
+    dataset_fingerprint: str
+    completed_episode_count: int
+    completed_episode_prefix_sha256: str
+    optimizer_steps: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.dataset_fingerprint, str) or not self.dataset_fingerprint:
+            raise ValueError("dataset_fingerprint is required")
+        if type(self.completed_episode_count) is not int or self.completed_episode_count < 0:
+            raise ValueError("completed_episode_count must be a non-negative integer")
+        try:
+            if len(bytes.fromhex(self.completed_episode_prefix_sha256)) != 32:
+                raise ValueError
+        except (TypeError, ValueError) as error:
+            raise ValueError("completed episode prefix must be a SHA-256 digest") from error
+        if type(self.optimizer_steps) is not int or self.optimizer_steps < 0:
+            raise ValueError("optimizer_steps must be a non-negative integer")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "dataset_fingerprint": self.dataset_fingerprint,
+            "completed_episode_count": self.completed_episode_count,
+            "completed_episode_prefix_sha256": self.completed_episode_prefix_sha256,
+            "optimizer_steps": self.optimizer_steps,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Any) -> "TrainingRunProgress":
+        if not isinstance(payload, dict):
+            raise ValueError("training checkpoint progress is invalid")
+        fingerprint = payload.get("dataset_fingerprint")
+        count = payload.get("completed_episode_count")
+        prefix = payload.get("completed_episode_prefix_sha256")
+        steps = payload.get("optimizer_steps")
+        if (
+            not isinstance(fingerprint, str)
+            or type(count) is not int
+            or not isinstance(prefix, str)
+            or type(steps) is not int
+        ):
+            raise ValueError("training checkpoint progress fields are invalid")
+        return cls(fingerprint, count, prefix, steps)
+
+
+@dataclass(frozen=True, slots=True)
 class TrainingCheckpointRef:
     """Identity and compatibility metadata for a saved training checkpoint."""
 
@@ -77,6 +135,17 @@ class TrainingCheckpointRef:
     path: Path
     update_step: int
     training_config_fingerprint: str
+    progress: TrainingRunProgress | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CheckpointedTrainingResult:
+    """Metrics and durable cursor returned after a checkpointed run segment."""
+
+    pass_result: TrainingPassResult
+    last_checkpoint: TrainingCheckpointRef
+    resumed_episode_count: int
+    processed_episode_count: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,6 +208,7 @@ class FirstLightILTrainer:
         *,
         optimizer: Any | None = None,
         update_step: int,
+        progress: TrainingRunProgress | None = None,
     ) -> TrainingCheckpointRef:
         """Atomically save FirstLight V4 weights with an ElixirEcho run contract.
 
@@ -148,6 +218,8 @@ class FirstLightILTrainer:
 
         if type(update_step) is not int or update_step < 0:
             raise ValueError("update_step must be a non-negative integer")
+        if progress is not None and progress.optimizer_steps != update_step:
+            raise ValueError("checkpoint update_step must match training progress")
         destination = Path(path).expanduser().absolute()
         if destination.name in {"", ".", ".."}:
             raise ValueError("checkpoint path must name a new directory")
@@ -174,7 +246,10 @@ class FirstLightILTrainer:
                 update_step=update_step,
                 training_stage="elixir_echo_imitation_learning",
                 gamma_per_decision=1.0,
-                extra={"elixir_echo": training_contract},
+                extra={
+                    "elixir_echo": training_contract,
+                    "elixir_echo_progress": progress.to_dict() if progress is not None else None,
+                },
             )
             manifest = {
                 **training_contract,
@@ -183,6 +258,7 @@ class FirstLightILTrainer:
                 "provider_contract": provider_contract,
                 "weights_file": _CHECKPOINT_WEIGHTS_NAME,
                 "checkpoint_sha256": self._sha256(weights_path),
+                "progress": progress.to_dict() if progress is not None else None,
             }
             (staging / "manifest.json").write_text(
                 json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
@@ -199,7 +275,32 @@ class FirstLightILTrainer:
             path=destination,
             update_step=update_step,
             training_config_fingerprint=self.config.fingerprint(),
+            progress=progress,
         )
+
+    @staticmethod
+    def _read_checkpoint_progress(
+        path: str | Path,
+        *,
+        expected_dataset_fingerprint: str,
+    ) -> TrainingRunProgress:
+        """Read the immutable cursor before restoring model/optimizer state."""
+
+        manifest_path = Path(path).expanduser().absolute() / "manifest.json"
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise ValueError("training checkpoint progress is unreadable") from error
+        if not isinstance(manifest, dict):
+            raise ValueError("training checkpoint progress is invalid")
+        if manifest.get("schema") != _CHECKPOINT_MANIFEST_SCHEMA:
+            raise ValueError("unsupported ElixirEcho training checkpoint schema")
+        progress = TrainingRunProgress.from_dict(manifest.get("progress"))
+        if progress.dataset_fingerprint != expected_dataset_fingerprint:
+            raise ValueError("training dataset fingerprint does not match checkpoint")
+        if manifest.get("update_step") != progress.optimizer_steps:
+            raise ValueError("training checkpoint progress step does not match manifest")
+        return progress
 
     def restore_checkpoint(
         self,
@@ -207,6 +308,7 @@ class FirstLightILTrainer:
         *,
         optimizer: Any | None = None,
         restore_rng: bool = True,
+        expected_dataset_fingerprint: str | None = None,
     ) -> TrainingCheckpointRef:
         """Validate config, provider contract, and file hash before restoring."""
 
@@ -219,6 +321,8 @@ class FirstLightILTrainer:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as error:
             raise ValueError("training checkpoint manifest is unreadable") from error
+        if not isinstance(manifest, dict):
+            raise ValueError("training checkpoint manifest is invalid")
         if manifest.get("schema") != _CHECKPOINT_MANIFEST_SCHEMA:
             raise ValueError("unsupported ElixirEcho training checkpoint schema")
         if manifest.get("weights_file") != _CHECKPOINT_WEIGHTS_NAME:
@@ -230,6 +334,18 @@ class FirstLightILTrainer:
         update_step = manifest.get("update_step")
         if type(update_step) is not int or update_step < 0:
             raise ValueError("training checkpoint update_step is invalid")
+        progress = (
+            TrainingRunProgress.from_dict(manifest["progress"])
+            if manifest.get("progress") is not None
+            else None
+        )
+        if progress is not None and progress.optimizer_steps != update_step:
+            raise ValueError("training checkpoint progress step does not match manifest")
+        if expected_dataset_fingerprint is not None:
+            if progress is None:
+                raise ValueError("checkpoint has no resumable training progress")
+            if progress.dataset_fingerprint != expected_dataset_fingerprint:
+                raise ValueError("training dataset fingerprint does not match checkpoint")
 
         checkpoint = self.backend.runtime.import_module("native_runner.training.v4.checkpoint")
         expected_provider_contract = self._json_value(
@@ -259,6 +375,10 @@ class FirstLightILTrainer:
             "training_config_fingerprint": self.config.fingerprint(),
         }:
             raise ValueError("FirstLight checkpoint metadata does not match manifest")
+        if preflight.get("extra", {}).get("elixir_echo_progress") != (
+            progress.to_dict() if progress is not None else None
+        ):
+            raise ValueError("FirstLight checkpoint progress does not match manifest")
 
         payload = checkpoint.load_actor_critic_checkpoint(
             weights_path,
@@ -280,11 +400,16 @@ class FirstLightILTrainer:
             raise ValueError("FirstLight checkpoint update_step does not match manifest")
         if payload.get("checkpoint_id") != manifest.get("checkpoint_id"):
             raise ValueError("FirstLight checkpoint identity does not match manifest")
+        if payload.get("extra", {}).get("elixir_echo_progress") != (
+            progress.to_dict() if progress is not None else None
+        ):
+            raise ValueError("FirstLight checkpoint progress does not match manifest")
         return TrainingCheckpointRef(
             checkpoint_id=str(manifest["checkpoint_id"]),
             path=source,
             update_step=update_step,
             training_config_fingerprint=self.config.fingerprint(),
+            progress=progress,
         )
 
     def _sequence(self, compiled: CompiledActorSequence) -> Any:
@@ -582,6 +707,149 @@ class FirstLightILTrainer:
             excluded_untrainable_actor_sequence_count=excluded_untrainable_sequences,
             optimizer_steps=optimizer_steps,
             loss_history=tuple(loss_history),
+        )
+
+    def train_episodes_resumable(
+        self,
+        episodes: Iterable[TrainingEpisode],
+        *,
+        input_builder: Any,
+        dataset_fingerprint: str,
+        checkpoint_directory: str | Path,
+        checkpoint_every: int,
+        optimizer: Any | None = None,
+        resume_from: str | Path | None = None,
+    ) -> CheckpointedTrainingResult:
+        """Train sequentially, checkpointing only after complete episodes.
+
+        The caller supplies a stable fingerprint for the ordered training
+        cache. On resume, the persisted episode-ID prefix is checked before
+        model or optimizer state is restored, then already completed episodes
+        are skipped. Work since the last checkpoint may be safely replayed.
+        """
+
+        import torch
+
+        if not isinstance(dataset_fingerprint, str) or not dataset_fingerprint:
+            raise ValueError("dataset_fingerprint is required")
+        if type(checkpoint_every) is not int or checkpoint_every <= 0:
+            raise ValueError("checkpoint_every must be a positive integer")
+        shared_optimizer = optimizer
+        if shared_optimizer is None:
+            shared_optimizer = torch.optim.AdamW(
+                self.backend.model.parameters(),
+                lr=self.config.learning_rate,
+                weight_decay=self.config.weight_decay,
+            )
+
+        episode_iterator = iter(episodes)
+        completed_count = 0
+        prefix_sha256 = _EMPTY_EPISODE_PREFIX_SHA256
+        resumed_count = 0
+        optimizer_steps = 0
+        last_checkpoint: TrainingCheckpointRef | None = None
+        processed_ids: set[str] = set()
+        if resume_from is not None:
+            saved_progress = self._read_checkpoint_progress(
+                resume_from,
+                expected_dataset_fingerprint=dataset_fingerprint,
+            )
+            for _index in range(saved_progress.completed_episode_count):
+                try:
+                    episode = next(episode_iterator)
+                except StopIteration as error:
+                    raise ValueError("training source ends before checkpoint cursor") from error
+                if episode.episode_id in processed_ids:
+                    raise ValueError(f"duplicate training episode identity {episode.episode_id!r}")
+                processed_ids.add(episode.episode_id)
+                prefix_sha256 = _advance_episode_prefix_sha256(prefix_sha256, episode.episode_id)
+            if prefix_sha256 != saved_progress.completed_episode_prefix_sha256:
+                raise ValueError("training episode order differs from checkpoint cursor")
+            last_checkpoint = self.restore_checkpoint(
+                resume_from,
+                optimizer=shared_optimizer,
+                expected_dataset_fingerprint=dataset_fingerprint,
+            )
+            if last_checkpoint.progress != saved_progress:
+                raise ValueError("restored training progress differs from checkpoint cursor")
+            completed_count = saved_progress.completed_episode_count
+            resumed_count = completed_count
+            prefix_sha256 = saved_progress.completed_episode_prefix_sha256
+            optimizer_steps = saved_progress.optimizer_steps
+
+        episode_count = actor_sequence_count = decision_count = trainable_decision_count = 0
+        excluded_split = excluded_truncated = excluded_untrainable = new_optimizer_steps = 0
+        loss_history: list[float] = []
+        def persist_progress() -> TrainingCheckpointRef:
+            progress = TrainingRunProgress(
+                dataset_fingerprint=dataset_fingerprint,
+                completed_episode_count=completed_count,
+                completed_episode_prefix_sha256=prefix_sha256,
+                optimizer_steps=optimizer_steps,
+            )
+            target = Path(checkpoint_directory) / (
+                f"episode-{completed_count:06d}-step-{optimizer_steps:08d}"
+            )
+            return self.save_checkpoint(
+                target,
+                optimizer=shared_optimizer,
+                update_step=optimizer_steps,
+                progress=progress,
+            )
+
+        while True:
+            try:
+                episode = next(episode_iterator)
+            except StopIteration:
+                break
+            if episode.episode_id in processed_ids:
+                raise ValueError(f"duplicate training episode identity {episode.episode_id!r}")
+            pass_result = self.train_episodes(
+                (episode,),
+                input_builder=input_builder,
+                optimizer=shared_optimizer,
+                max_episodes=1,
+            )
+            processed_ids.add(episode.episode_id)
+            prefix_sha256 = _advance_episode_prefix_sha256(prefix_sha256, episode.episode_id)
+            completed_count += 1
+            episode_count += pass_result.episode_count
+            actor_sequence_count += pass_result.actor_sequence_count
+            decision_count += pass_result.decision_count
+            trainable_decision_count += pass_result.trainable_decision_count
+            excluded_split += pass_result.excluded_split_episode_count
+            excluded_truncated += pass_result.excluded_truncated_episode_count
+            excluded_untrainable += pass_result.excluded_untrainable_actor_sequence_count
+            optimizer_steps += pass_result.optimizer_steps
+            new_optimizer_steps += pass_result.optimizer_steps
+            loss_history.extend(pass_result.loss_history)
+            if completed_count % checkpoint_every == 0:
+                last_checkpoint = persist_progress()
+
+        if not completed_count:
+            raise ValueError("training source contains no episodes")
+        if last_checkpoint is None or (
+            last_checkpoint.progress is not None
+            and last_checkpoint.progress.completed_episode_count != completed_count
+        ):
+            last_checkpoint = persist_progress()
+
+        pass_result = TrainingPassResult(
+            episode_count=episode_count,
+            actor_sequence_count=actor_sequence_count,
+            decision_count=decision_count,
+            trainable_decision_count=trainable_decision_count,
+            excluded_split_episode_count=excluded_split,
+            excluded_truncated_episode_count=excluded_truncated,
+            excluded_untrainable_actor_sequence_count=excluded_untrainable,
+            optimizer_steps=new_optimizer_steps,
+            loss_history=tuple(loss_history),
+        )
+        return CheckpointedTrainingResult(
+            pass_result=pass_result,
+            last_checkpoint=last_checkpoint,
+            resumed_episode_count=resumed_count,
+            processed_episode_count=completed_count - resumed_count,
         )
 
     def tiny_overfit(

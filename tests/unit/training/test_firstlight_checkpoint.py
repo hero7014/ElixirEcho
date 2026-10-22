@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from elixir_echo.integrations.firstlight.trainer import FirstLightILTrainer
+from elixir_echo.integrations.firstlight.trainer import TrainingRunProgress
 from elixir_echo.training.config import TrainingConfig
 
 
@@ -136,3 +137,18 @@ def test_checkpoint_directory_is_not_overwritten(tmp_path):
         trainer.save_checkpoint(destination, update_step=8)
 
     assert len(module.save_calls) == 1
+
+
+def test_checkpoint_rejects_dataset_fingerprint_mismatch_before_loading(tmp_path):
+    trainer, module, _ = _trainer()
+    destination = tmp_path / "checkpoint-0007"
+    progress = TrainingRunProgress("dataset-a", 1, "0" * 64, 7)
+    trainer.save_checkpoint(destination, update_step=7, progress=progress)
+
+    with pytest.raises(ValueError, match="dataset fingerprint"):
+        trainer.restore_checkpoint(
+            destination,
+            expected_dataset_fingerprint="dataset-b",
+        )
+
+    assert module.load_calls == []
