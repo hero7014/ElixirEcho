@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import fields, is_dataclass, replace
+from dataclasses import fields, is_dataclass
 import importlib
 import json
 import os
@@ -97,6 +97,11 @@ def test_legacy_semantic_frame_path_audits_elixirecho_checkpoint_compatibility()
         old_tensorizer = legacy_tensorizer_module.SemanticFrameTensorizerV1(legacy_runtime)
         new_tracker = PublicStateTracker()
         new_input_builder = PolicyInputBuilder(provider, components=backend.components)
+        legacy_input_builder = PolicyInputBuilder(
+            provider,
+            components=backend.components,
+            legacy_checkpoint_input=True,
+        )
         backend.model.eval()
         zero_state = backend.initial_state().payload
         actor_index = 0
@@ -249,6 +254,12 @@ def test_legacy_semantic_frame_path_audits_elixirecho_checkpoint_compatibility()
                         temporal_context,
                         ObservationProfile.RICH,
                     )
+                    legacy_compatible_input = legacy_input_builder.build(
+                        new_observation,
+                        action_mask,
+                        temporal_context,
+                        ObservationProfile.RICH,
+                    )
                     # The legacy checkpoint's tensorizer leaves child feature
                     # channels 36:45 at zero. ElixirEcho populates the richer
                     # RICH-only runtime extension there. All other tensor values,
@@ -289,18 +300,8 @@ def test_legacy_semantic_frame_path_audits_elixirecho_checkpoint_compatibility()
                         max_shield_feature_delta,
                         float(shield_spatial_delta.max().item()),
                     )
-                    baseline_group_features = new_group_features.clone()
-                    baseline_child_features = new_child_features.clone()
-                    baseline_child_features[:, :, 36:45] = 0
-                    baseline_groups = replace(
-                        live_batch.groups,
-                        features=baseline_group_features,
-                        child_features=baseline_child_features,
-                    )
-                    baseline_batch = replace(
-                        live_batch,
-                        groups=baseline_groups,
-                    )
+                    baseline_batch = legacy_compatible_input.tensors.batch
+                    assert legacy_compatible_input.tensors.input_mode == "legacy_checkpoint"
                     _assert_tree_close(
                         old_composed.batch,
                         baseline_batch,
@@ -340,7 +341,8 @@ def test_legacy_semantic_frame_path_audits_elixirecho_checkpoint_compatibility()
                 new_tracker.after_action(expert_action)
                 actor_index += 1
 
-        assert actor_index == 703, f"expected all 703 actor-0 records, got {actor_index}"
+        # This sealed legacy episode contains 2,324 records total: 1,162 per actor.
+        assert actor_index == 1_162, f"expected all 1,162 actor-0 records, got {actor_index}"
         assert compared == [
             (90, 0), (250, 0), (710, 0), (835, 0), (2555, 0), (3600, 0)
         ], f"unexpected parity sample identities: {compared}"

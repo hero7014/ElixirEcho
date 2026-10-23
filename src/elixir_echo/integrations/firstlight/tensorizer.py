@@ -29,6 +29,7 @@ class TensorizedDecision:
     candidate_index_by_slot: Mapping[int, int]
     candidate_uid_by_slot: Mapping[int, int]
     actor: int
+    input_mode: str = "rich"
 
 
 def load_v4_components(runtime: FirstLightRuntime) -> Any:
@@ -111,11 +112,14 @@ class ObservationTensorizer:
     FORM_NORMAL, FORM_EVOLUTION, FORM_HERO, FORM_HERO_ACTIVE = 0, 1, 2, 3
     PREVIOUS_ACTION_STATUS_SCALAR = 17
 
-    def __init__(self, components: Any) -> None:
+    def __init__(
+        self, components: Any, *, legacy_checkpoint_input: bool = False
+    ) -> None:
         self.components = load_v4_components(components) if isinstance(components, FirstLightRuntime) else components
         self.config = self.components.config
         self.types = self.components.types
         self.bundle = self.components.bundle
+        self.input_mode = "legacy_checkpoint" if legacy_checkpoint_input else "rich"
 
     def _owner(self, owner: Any, actor: int) -> int:
         if owner not in (0, 1):
@@ -290,7 +294,8 @@ class ObservationTensorizer:
             kind = str(entity.get("entity_kind", "unknown"))
             form_value = _mapping(_known(entity.get("current_form")))
             variant = form_value.get("variant", "base")
-            if variant in {"evolution", "evolved"}:
+            evolution = _mapping(entity.get("evolution"))
+            if variant in {"evolution", "evolved"} or evolution.get("active") is True:
                 forms[0, row] = self.FORM_EVOLUTION
             elif kind == "hero":
                 active = any(
@@ -657,6 +662,8 @@ class ObservationTensorizer:
         own, opponent, card_rows = self._cards(profile, actor, temporal_context)
         towers, tower_rows = self._towers(profile, actor)
         groups, group_rows = self._entities(profile, actor)
+        if self.input_mode == "legacy_checkpoint":
+            groups.child_features[:, :, 36:45] = 0
         candidates, slot_rows, slot_uids = self._candidates(profile, actor, action_mask, card_rows)
         previous, previous_status = self._previous_action(temporal_context)
         config = self.config
@@ -712,15 +719,23 @@ class ObservationTensorizer:
                 entity_archetype_vocab_size=self.bundle.entity_archetype_catalog.vocab_size,
                 effect_vocab_size=self.bundle.effect_catalog.vocab_size,
             )
-        return TensorizedDecision(batch, slot_rows, slot_uids, actor)
+        return TensorizedDecision(batch, slot_rows, slot_uids, actor, self.input_mode)
 
 
 class PolicyInputBuilder:
     """Bind the selected Observation, same-tick ActionMask, and TemporalContext."""
 
-    def __init__(self, runtime: FirstLightRuntime, *, components: Any | None = None) -> None:
+    def __init__(
+        self,
+        runtime: FirstLightRuntime,
+        *,
+        components: Any | None = None,
+        legacy_checkpoint_input: bool = False,
+    ) -> None:
         self.components = components or load_v4_components(runtime)
-        self.tensorizer = ObservationTensorizer(self.components)
+        self.tensorizer = ObservationTensorizer(
+            self.components, legacy_checkpoint_input=legacy_checkpoint_input
+        )
 
     def build(
         self,

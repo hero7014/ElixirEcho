@@ -85,6 +85,47 @@ def test_actor_one_towers_are_mirrored_and_evolved_entities_keep_their_form(runt
     assert decision.batch.groups.runtime_form[0, 0].item() == tensorizer.FORM_EVOLUTION
 
 
+def test_evolved_entity_uses_active_evolution_when_current_form_is_not_applicable(runtime) -> None:
+    tensorizer = ObservationTensorizer(runtime)
+    profile = _profile(rich=True)
+    profile["entities"] = [
+        {
+            **profile["entities"][0],
+            "card_id": 26_000_050,
+            "entity_kind": "unknown",
+            "current_form": {"status": "not_applicable", "value": None},
+            "evolution": {"active": True, "phase": "evolved"},
+        }
+    ]
+
+    decision = tensorizer.tensorize(profile, actor=0, action_mask=_mask())
+
+    assert decision.batch.groups.runtime_form[0, 0].item() == tensorizer.FORM_EVOLUTION
+
+
+def test_historical_checkpoint_mode_zeros_only_legacy_reserved_child_channels(runtime) -> None:
+    profile = _profile(rich=True)
+    profile["entities"][0]["visibility"] = {
+        "targetable_by_owner": {"0": True},
+        "area_damage_eligible": True,
+    }
+    rich = ObservationTensorizer(runtime).tensorize(
+        profile, actor=0, action_mask=_mask()
+    )
+    legacy = ObservationTensorizer(
+        runtime, legacy_checkpoint_input=True
+    ).tensorize(profile, actor=0, action_mask=_mask())
+
+    assert rich.batch.groups.child_features[:, :, 36:45].count_nonzero().item() > 0
+    assert legacy.batch.groups.child_features[:, :, 36:45].count_nonzero().item() == 0
+    torch.testing.assert_close(
+        legacy.batch.groups.child_features[:, :, :36],
+        rich.batch.groups.child_features[:, :, :36],
+    )
+    assert legacy.input_mode == "legacy_checkpoint"
+    assert rich.input_mode == "rich"
+
+
 def test_rich_hero_active_form_and_attack_charge_fields_reach_v4(runtime) -> None:
     tensorizer = ObservationTensorizer(runtime)
     profile = _profile(rich=True)
