@@ -16,6 +16,7 @@ from elixir_echo.training.labels import classify_expert_action
 
 
 _FINGERPRINT_SCHEMA = b"elixir_echo.training-dataset@1\0"
+_SPLIT_FINGERPRINT_SCHEMA = "elixir_echo.episode-split-assignment@1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,6 +24,7 @@ class TrainingDatasetPlan:
     """A deterministic, safe projection of a capped train-split cache."""
 
     fingerprint: str
+    data_split_fingerprint: str
     selected_episode_ids: tuple[str, ...]
     episode_content_sha256: tuple[str, ...]
     selected_decision_count: int
@@ -42,6 +44,7 @@ class TrainingDatasetPlan:
     def to_dict(self) -> dict[str, Any]:
         return {
             "dataset_fingerprint": self.fingerprint,
+            "data_split_fingerprint": self.data_split_fingerprint,
             "selected_episode_count": self.selected_episode_count,
             "selected_decision_count": self.selected_decision_count,
             "selected_label_counts": dict(sorted(self.selected_label_counts.items())),
@@ -62,6 +65,18 @@ def _safe_episode_digest(episode: TrainingEpisode) -> str:
     return content_sha256(episode.to_dict())
 
 
+def _split_assignment_fingerprint(assignments: dict[str, str]) -> str:
+    return content_sha256(
+        {
+            "schema": _SPLIT_FINGERPRINT_SCHEMA,
+            "assignments": [
+                {"episode_id": episode_id, "split": split}
+                for episode_id, split in sorted(assignments.items())
+            ],
+        }
+    )
+
+
 def plan_training_dataset(
     reader: TrainingTrajectoryReader,
     *,
@@ -79,6 +94,7 @@ def plan_training_dataset(
     source_split_counts: Counter[str] = Counter()
     source_outcome_counts: Counter[str] = Counter()
     source_split_outcome_counts: Counter[str] = Counter()
+    split_assignments: dict[str, str] = {}
     source_episode_count = 0
     assigned_without_episode_manifest_count = 0
 
@@ -98,6 +114,10 @@ def plan_training_dataset(
     catalog_factory = getattr(reader, "training_catalog", None)
     if callable(catalog_factory):
         catalog = catalog_factory(max_episodes=max_episodes)
+        catalog_assignments = getattr(catalog, "split_assignments", None)
+        if not isinstance(catalog_assignments, dict):
+            raise ValueError("training catalog must expose the complete frozen split assignments")
+        split_assignments.update(catalog_assignments)
         for episode_id in catalog.selected_episode_ids:
             include_episode(reader.read_episode(episode_id))
         source_split_counts.update(catalog.split_counts)
@@ -119,6 +139,7 @@ def plan_training_dataset(
             seen.add(episode.episode_id)
             if episode.split is None:
                 raise ValueError(f"episode {episode.episode_id!r} has no frozen dataset split")
+            split_assignments[episode.episode_id] = episode.split
             if episode.split != "train":
                 excluded_split += 1
                 continue
@@ -133,6 +154,7 @@ def plan_training_dataset(
 
     return TrainingDatasetPlan(
         fingerprint=digest.hexdigest(),
+        data_split_fingerprint=_split_assignment_fingerprint(split_assignments),
         selected_episode_ids=tuple(selected_ids),
         episode_content_sha256=tuple(selected_hashes),
         selected_decision_count=selected_decisions,
@@ -191,12 +213,17 @@ def run_firstlight_training(
     runtime = FirstLightRuntime(firstlight_root)
     backend = FirstLightPolicyBackend(runtime, device=device)
     config = TrainingConfig()
-    input_builder = PolicyInputBuilder(runtime, components=backend.components)
+    input_builder = PolicyInputBuilder(
+        runtime,
+        components=backend.components,
+        legacy_checkpoint_input=config.input_mode == "legacy_checkpoint",
+    )
     trainer = FirstLightILTrainer(backend, config)
     result = trainer.train_episodes_resumable(
         iter_verified_training_episodes(reader, plan),
         input_builder=input_builder,
         dataset_fingerprint=plan.fingerprint,
+        data_split_fingerprint=plan.data_split_fingerprint,
         checkpoint_directory=checkpoint_directory,
         checkpoint_every=checkpoint_every,
         resume_from=resume_from,
@@ -205,6 +232,8 @@ def run_firstlight_training(
         "mode": "training_run",
         **plan.to_dict(),
         "profile": config.profile.value,
+        "input_schema": config.to_dict()["input_schema"],
+        "input_mode": config.input_mode,
         "training_config_fingerprint": config.fingerprint(),
         "resumed_episode_count": result.resumed_episode_count,
         "processed_episode_count": result.processed_episode_count,

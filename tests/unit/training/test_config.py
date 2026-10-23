@@ -34,8 +34,12 @@ def test_training_fingerprint_covers_gate_act_weight_and_profile():
 
     assert config.fingerprint() != replace(config, gate_act_weight=4.0).fingerprint()
     assert config.fingerprint() != replace(config, profile=ObservationProfile.MIN).fingerprint()
+    assert config.fingerprint() != replace(config, input_mode="legacy_checkpoint").fingerprint()
     assert config.fingerprint() != replace(config, tbptt_length=16).fingerprint()
     assert config.to_dict()["tbptt_length"] == 32
+    assert config.to_dict()["input_schema"] == "elixir_echo.firstlight-v4-policy-input@1"
+    assert config.to_dict()["input_mode"] == "rich"
+    assert config.legacy_checkpoint_dict()["profile"] == "full"
 
 
 def test_training_config_serializes_each_label_head_mask_for_checkpoint_identity():
@@ -116,6 +120,7 @@ def test_first_pass_cannot_enable_ability_supervision():
         {"tbptt_length": 0},
         {"tbptt_length": True},
         {"tbptt_length": 1.5},
+        {"input_mode": "unrecognized"},
     ],
 )
 def test_first_pass_rejects_out_of_scope_or_invalid_training_config(values):

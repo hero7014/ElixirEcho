@@ -3,7 +3,12 @@ from __future__ import annotations
 import pytest
 
 from elixir_echo.domain import ExpertAction
-from elixir_echo.training.labels import LabelCategory, classify_expert_action
+from elixir_echo.training.config import HeadSupervision, TrainingConfig, supervision_for
+from elixir_echo.training.labels import (
+    LabelCategory,
+    classify_expert_action,
+    validate_label_supervision,
+)
 
 
 @pytest.mark.parametrize(
@@ -41,3 +46,27 @@ def test_malformed_expert_action_has_its_own_category():
     action = ExpertAction.from_legacy({"not": "an action list"})
 
     assert classify_expert_action(action) is LabelCategory.MALFORMED
+
+
+def test_cached_label_supervision_is_checked_against_category_and_training_config():
+    config = TrainingConfig()
+    validate_label_supervision(
+        LabelCategory.WAIT,
+        supervision_for(LabelCategory.WAIT, config),
+        True,
+        config,
+    )
+    with pytest.raises(ValueError, match="approved policy for single_ability"):
+        validate_label_supervision(
+            LabelCategory.SINGLE_ABILITY,
+            HeadSupervision(gate=True),
+            True,
+            config,
+        )
+    with pytest.raises(ValueError, match="trainability"):
+        validate_label_supervision(
+            LabelCategory.MULTI_ACTION,
+            supervision_for(LabelCategory.MULTI_ACTION, config),
+            True,
+            config,
+        )

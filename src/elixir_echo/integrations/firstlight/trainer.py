@@ -14,13 +14,15 @@ import tempfile
 from typing import Any
 
 from elixir_echo.datasets.trajectory import TrainingEpisode
+from elixir_echo.domain.values import content_sha256
 from elixir_echo.integrations.firstlight.il import compile_firstlight_actor_sequence
 from elixir_echo.integrations.firstlight.policy import FirstLightPolicyBackend
 from elixir_echo.training.config import TrainingConfig
 from elixir_echo.training.sequence import CompiledActorSequence
 
 
-_CHECKPOINT_MANIFEST_SCHEMA = "elixir_echo.training-checkpoint@1"
+_CHECKPOINT_MANIFEST_SCHEMA = "elixir_echo.training-checkpoint@2"
+_LEGACY_CHECKPOINT_MANIFEST_SCHEMA = "elixir_echo.training-checkpoint@1"
 _CHECKPOINT_WEIGHTS_NAME = "firstlight-v4.pt"
 _EMPTY_EPISODE_PREFIX_SHA256 = hashlib.sha256(b"").hexdigest()
 
@@ -87,10 +89,17 @@ class TrainingRunProgress:
     completed_episode_count: int
     completed_episode_prefix_sha256: str
     optimizer_steps: int
+    data_split_fingerprint: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.dataset_fingerprint, str) or not self.dataset_fingerprint:
             raise ValueError("dataset_fingerprint is required")
+        if self.data_split_fingerprint is not None:
+            try:
+                if len(bytes.fromhex(self.data_split_fingerprint)) != 32:
+                    raise ValueError
+            except (TypeError, ValueError) as error:
+                raise ValueError("data_split_fingerprint must be a SHA-256 digest") from error
         if type(self.completed_episode_count) is not int or self.completed_episode_count < 0:
             raise ValueError("completed_episode_count must be a non-negative integer")
         try:
@@ -102,12 +111,15 @@ class TrainingRunProgress:
             raise ValueError("optimizer_steps must be a non-negative integer")
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "dataset_fingerprint": self.dataset_fingerprint,
             "completed_episode_count": self.completed_episode_count,
             "completed_episode_prefix_sha256": self.completed_episode_prefix_sha256,
             "optimizer_steps": self.optimizer_steps,
         }
+        if self.data_split_fingerprint is not None:
+            payload["data_split_fingerprint"] = self.data_split_fingerprint
+        return payload
 
     @classmethod
     def from_dict(cls, payload: Any) -> "TrainingRunProgress":
@@ -124,7 +136,7 @@ class TrainingRunProgress:
             or type(steps) is not int
         ):
             raise ValueError("training checkpoint progress fields are invalid")
-        return cls(fingerprint, count, prefix, steps)
+        return cls(fingerprint, count, prefix, steps, payload.get("data_split_fingerprint"))
 
 
 @dataclass(frozen=True, slots=True)
@@ -220,6 +232,8 @@ class FirstLightILTrainer:
             raise ValueError("update_step must be a non-negative integer")
         if progress is not None and progress.optimizer_steps != update_step:
             raise ValueError("checkpoint update_step must match training progress")
+        if progress is not None and progress.data_split_fingerprint is None:
+            raise ValueError("checkpoint training progress requires a complete data-split fingerprint")
         destination = Path(path).expanduser().absolute()
         if destination.name in {"", ".", ".."}:
             raise ValueError("checkpoint path must name a new directory")
@@ -231,8 +245,11 @@ class FirstLightILTrainer:
         provider_contract = self._json_value(checkpoint.checkpoint_contract(self.backend.model))
         training_contract = {
             "schema": _CHECKPOINT_MANIFEST_SCHEMA,
+            "input_schema": self.config.to_dict()["input_schema"],
+            "input_mode": self.config.input_mode,
             "training_config": self.config.to_dict(),
             "training_config_fingerprint": self.config.fingerprint(),
+            "data_split_fingerprint": progress.data_split_fingerprint if progress is not None else None,
         }
         staging = Path(
             tempfile.mkdtemp(prefix=f".{destination.name}.", dir=destination.parent)
@@ -283,6 +300,7 @@ class FirstLightILTrainer:
         path: str | Path,
         *,
         expected_dataset_fingerprint: str,
+        expected_data_split_fingerprint: str,
     ) -> TrainingRunProgress:
         """Read the immutable cursor before restoring model/optimizer state."""
 
@@ -293,11 +311,20 @@ class FirstLightILTrainer:
             raise ValueError("training checkpoint progress is unreadable") from error
         if not isinstance(manifest, dict):
             raise ValueError("training checkpoint progress is invalid")
-        if manifest.get("schema") != _CHECKPOINT_MANIFEST_SCHEMA:
+        if manifest.get("schema") not in {
+            _CHECKPOINT_MANIFEST_SCHEMA,
+            _LEGACY_CHECKPOINT_MANIFEST_SCHEMA,
+        }:
             raise ValueError("unsupported ElixirEcho training checkpoint schema")
         progress = TrainingRunProgress.from_dict(manifest.get("progress"))
         if progress.dataset_fingerprint != expected_dataset_fingerprint:
             raise ValueError("training dataset fingerprint does not match checkpoint")
+        if progress.data_split_fingerprint != expected_data_split_fingerprint:
+            raise ValueError("training data-split fingerprint does not match checkpoint")
+        if manifest.get("schema") == _CHECKPOINT_MANIFEST_SCHEMA and (
+            manifest.get("data_split_fingerprint") != progress.data_split_fingerprint
+        ):
+            raise ValueError("training data-split fingerprint does not match checkpoint progress")
         if manifest.get("update_step") != progress.optimizer_steps:
             raise ValueError("training checkpoint progress step does not match manifest")
         return progress
@@ -309,6 +336,7 @@ class FirstLightILTrainer:
         optimizer: Any | None = None,
         restore_rng: bool = True,
         expected_dataset_fingerprint: str | None = None,
+        expected_data_split_fingerprint: str | None = None,
     ) -> TrainingCheckpointRef:
         """Validate config, provider contract, and file hash before restoring."""
 
@@ -323,13 +351,34 @@ class FirstLightILTrainer:
             raise ValueError("training checkpoint manifest is unreadable") from error
         if not isinstance(manifest, dict):
             raise ValueError("training checkpoint manifest is invalid")
-        if manifest.get("schema") != _CHECKPOINT_MANIFEST_SCHEMA:
+        manifest_schema = manifest.get("schema")
+        if manifest_schema not in {
+            _CHECKPOINT_MANIFEST_SCHEMA,
+            _LEGACY_CHECKPOINT_MANIFEST_SCHEMA,
+        }:
             raise ValueError("unsupported ElixirEcho training checkpoint schema")
         if manifest.get("weights_file") != _CHECKPOINT_WEIGHTS_NAME:
             raise ValueError("training checkpoint weights path is invalid")
-        if manifest.get("training_config_fingerprint") != self.config.fingerprint():
+        if manifest_schema == _CHECKPOINT_MANIFEST_SCHEMA:
+            expected_training_config = self.config.to_dict()
+            expected_config_fingerprint = self.config.fingerprint()
+            expected_mode = self.config.input_mode
+            if manifest.get("input_schema") != expected_training_config["input_schema"]:
+                raise ValueError("training input schema does not match checkpoint")
+            if manifest.get("input_mode") != expected_mode:
+                raise ValueError("training input mode does not match checkpoint")
+        else:
+            # Checkpoint V1 predates the explicit input contract. The supported
+            # project runner always used RICH input, so only that default can
+            # be migrated without guessing.
+            if self.config.input_mode != "rich":
+                raise ValueError("legacy checkpoint has no input mode and can only restore as RICH")
+            expected_training_config = self.config.legacy_checkpoint_dict()
+            expected_config_fingerprint = content_sha256(expected_training_config)
+            expected_mode = "rich"
+        if manifest.get("training_config_fingerprint") != expected_config_fingerprint:
             raise ValueError("training configuration fingerprint does not match checkpoint")
-        if manifest.get("training_config") != self.config.to_dict():
+        if manifest.get("training_config") != expected_training_config:
             raise ValueError("training configuration payload does not match checkpoint")
         update_step = manifest.get("update_step")
         if type(update_step) is not int or update_step < 0:
@@ -341,11 +390,20 @@ class FirstLightILTrainer:
         )
         if progress is not None and progress.optimizer_steps != update_step:
             raise ValueError("training checkpoint progress step does not match manifest")
+        if manifest_schema == _CHECKPOINT_MANIFEST_SCHEMA:
+            expected_split_fingerprint = progress.data_split_fingerprint if progress is not None else None
+            if manifest.get("data_split_fingerprint") != expected_split_fingerprint:
+                raise ValueError("training data-split fingerprint does not match checkpoint progress")
         if expected_dataset_fingerprint is not None:
             if progress is None:
                 raise ValueError("checkpoint has no resumable training progress")
             if progress.dataset_fingerprint != expected_dataset_fingerprint:
                 raise ValueError("training dataset fingerprint does not match checkpoint")
+        if expected_data_split_fingerprint is not None:
+            if progress is None:
+                raise ValueError("checkpoint has no resumable data-split progress")
+            if progress.data_split_fingerprint != expected_data_split_fingerprint:
+                raise ValueError("training data-split fingerprint does not match checkpoint")
 
         checkpoint = self.backend.runtime.import_module("native_runner.training.v4.checkpoint")
         expected_provider_contract = self._json_value(
@@ -369,11 +427,23 @@ class FirstLightILTrainer:
         if preflight.get("update_step") != update_step:
             raise ValueError("FirstLight checkpoint update_step does not match manifest")
         embedded_contract = preflight.get("extra", {}).get("elixir_echo", {})
-        if embedded_contract != {
-            "schema": _CHECKPOINT_MANIFEST_SCHEMA,
-            "training_config": self.config.to_dict(),
-            "training_config_fingerprint": self.config.fingerprint(),
-        }:
+        expected_embedded_contract = (
+            {
+                "schema": _CHECKPOINT_MANIFEST_SCHEMA,
+                "input_schema": self.config.to_dict()["input_schema"],
+                "input_mode": self.config.input_mode,
+                "training_config": self.config.to_dict(),
+                "training_config_fingerprint": self.config.fingerprint(),
+                "data_split_fingerprint": progress.data_split_fingerprint if progress is not None else None,
+            }
+            if manifest_schema == _CHECKPOINT_MANIFEST_SCHEMA
+            else {
+                "schema": _LEGACY_CHECKPOINT_MANIFEST_SCHEMA,
+                "training_config": self.config.legacy_checkpoint_dict(),
+                "training_config_fingerprint": content_sha256(self.config.legacy_checkpoint_dict()),
+            }
+        )
+        if embedded_contract != expected_embedded_contract:
             raise ValueError("FirstLight checkpoint metadata does not match manifest")
         if preflight.get("extra", {}).get("elixir_echo_progress") != (
             progress.to_dict() if progress is not None else None
@@ -390,11 +460,7 @@ class FirstLightILTrainer:
             restore_rng=restore_rng,
         )
         embedded_contract = payload.get("extra", {}).get("elixir_echo", {})
-        if embedded_contract != {
-            "schema": _CHECKPOINT_MANIFEST_SCHEMA,
-            "training_config": self.config.to_dict(),
-            "training_config_fingerprint": self.config.fingerprint(),
-        }:
+        if embedded_contract != expected_embedded_contract:
             raise ValueError("FirstLight checkpoint metadata does not match manifest")
         if payload.get("update_step") != update_step:
             raise ValueError("FirstLight checkpoint update_step does not match manifest")
@@ -417,6 +483,11 @@ class FirstLightILTrainer:
 
         if compiled.profile is not self.config.profile:
             raise ValueError("compiled sequence profile differs from TrainingConfig")
+        if any(
+            getattr(getattr(item, "tensors", None), "input_mode", None) != self.config.input_mode
+            for item in compiled.inputs
+        ):
+            raise ValueError("compiled sequence input mode differs from TrainingConfig")
         if not compiled.trainable_count:
             raise ValueError("training sequence contains no supported WAIT/play_card labels")
         device = self.backend.device
@@ -622,6 +693,50 @@ class FirstLightILTrainer:
             gradient_norms=tuple(gradient_norms),
         )
 
+    def train_sequence_batch(
+        self,
+        batch: Any,
+        *,
+        optimizer: Any | None = None,
+    ) -> tuple[RecurrentSequenceTrainResult | None, ...]:
+        """Train each independent actor lane in a padded episode batch.
+
+        The current FirstLight IL API consumes one recurrent sequence at a
+        time. Padding is therefore kept at the dataset boundary and never
+        passed to the model; each valid lane gets its own recurrent reset.
+        One optimizer is shared across lanes, in deterministic batch order.
+        """
+
+        import torch
+
+        from elixir_echo.datasets.sequence import SequenceBatch
+
+        if not isinstance(batch, SequenceBatch):
+            raise TypeError("batch must be a SequenceBatch")
+        batch.validate()
+        if not batch.lanes:
+            raise ValueError("sequence batch has no actor lanes")
+        if any(lane.profile is not self.config.profile for lane in batch.lanes):
+            raise ValueError("sequence batch profile differs from TrainingConfig")
+        shared_optimizer = optimizer
+        if shared_optimizer is None:
+            shared_optimizer = torch.optim.AdamW(
+                self.backend.model.parameters(),
+                lr=self.config.learning_rate,
+                weight_decay=self.config.weight_decay,
+            )
+
+        results: list[RecurrentSequenceTrainResult | None] = []
+        for lane_index, lane in enumerate(batch.lanes):
+            valid_steps = sum(row[lane_index] for row in batch.valid_mask)
+            if valid_steps != len(lane.inputs):
+                raise ValueError("sequence batch valid mask differs from actor lane length")
+            if not lane.trainable_count:
+                results.append(None)
+                continue
+            results.append(self.train_sequence(lane, optimizer=shared_optimizer))
+        return tuple(results)
+
     def train_episodes(
         self,
         episodes: Iterable[TrainingEpisode],
@@ -684,14 +799,19 @@ class FirstLightILTrainer:
                 )
                 for actor in (0, 1)
             )
-            for compiled in compiled_sequences:
+            from elixir_echo.datasets.sequence import SequenceBatch
+
+            batch = SequenceBatch.from_episode_groups((compiled_sequences,))
+            batch_results = self.train_sequence_batch(batch, optimizer=shared_optimizer)
+            for compiled, result in zip(batch.lanes, batch_results, strict=True):
                 actor_sequence_count += 1
                 decision_count += len(compiled.labels)
                 trainable_decision_count += compiled.trainable_count
                 if not compiled.trainable_count:
                     excluded_untrainable_sequences += 1
                     continue
-                result = self.train_sequence(compiled, optimizer=shared_optimizer)
+                if result is None:
+                    raise RuntimeError("trainable sequence batch lane returned no training result")
                 optimizer_steps += result.optimizer_steps
                 loss_history.extend(result.loss_history)
             episode_ids.add(episode.episode_id)
@@ -715,6 +835,7 @@ class FirstLightILTrainer:
         *,
         input_builder: Any,
         dataset_fingerprint: str,
+        data_split_fingerprint: str,
         checkpoint_directory: str | Path,
         checkpoint_every: int,
         optimizer: Any | None = None,
@@ -732,6 +853,11 @@ class FirstLightILTrainer:
 
         if not isinstance(dataset_fingerprint, str) or not dataset_fingerprint:
             raise ValueError("dataset_fingerprint is required")
+        try:
+            if len(bytes.fromhex(data_split_fingerprint)) != 32:
+                raise ValueError
+        except (TypeError, ValueError) as error:
+            raise ValueError("data_split_fingerprint must be a SHA-256 digest") from error
         if type(checkpoint_every) is not int or checkpoint_every <= 0:
             raise ValueError("checkpoint_every must be a positive integer")
         shared_optimizer = optimizer
@@ -753,6 +879,7 @@ class FirstLightILTrainer:
             saved_progress = self._read_checkpoint_progress(
                 resume_from,
                 expected_dataset_fingerprint=dataset_fingerprint,
+                expected_data_split_fingerprint=data_split_fingerprint,
             )
             for _index in range(saved_progress.completed_episode_count):
                 try:
@@ -769,6 +896,7 @@ class FirstLightILTrainer:
                 resume_from,
                 optimizer=shared_optimizer,
                 expected_dataset_fingerprint=dataset_fingerprint,
+                expected_data_split_fingerprint=data_split_fingerprint,
             )
             if last_checkpoint.progress != saved_progress:
                 raise ValueError("restored training progress differs from checkpoint cursor")
@@ -786,6 +914,7 @@ class FirstLightILTrainer:
                 completed_episode_count=completed_count,
                 completed_episode_prefix_sha256=prefix_sha256,
                 optimizer_steps=optimizer_steps,
+                data_split_fingerprint=data_split_fingerprint,
             )
             target = Path(checkpoint_directory) / (
                 f"episode-{completed_count:06d}-step-{optimizer_steps:08d}"

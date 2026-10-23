@@ -149,3 +149,24 @@ def test_legacy_store_catalog_uses_manifests_and_reader_hides_decks(tmp_path: Pa
     assert episode.episode_id == "train-episode"
     assert "deck0" not in json.dumps(episode.to_dict())
     assert tuple(iter_verified_training_episodes(reader, plan))[0].episode_id == "train-episode"
+
+
+def test_data_split_fingerprint_covers_validation_and_test_assignments(tmp_path: Path) -> None:
+    validation_store = tmp_path / "validation-store"
+    test_store = tmp_path / "test-store"
+    for root, held_out_split in (
+        (validation_store, "validation"),
+        (test_store, "test"),
+    ):
+        _write_legacy_store(root, "train-episode", "train", "terminated")
+        _write_legacy_store(root, "held-out-episode", held_out_split, "terminated")
+
+    validation_plan = plan_training_dataset(
+        LegacyTrainingTrajectoryStoreReader(validation_store), max_episodes=1
+    )
+    test_plan = plan_training_dataset(
+        LegacyTrainingTrajectoryStoreReader(test_store), max_episodes=1
+    )
+
+    assert validation_plan.fingerprint == test_plan.fingerprint
+    assert validation_plan.data_split_fingerprint != test_plan.data_split_fingerprint

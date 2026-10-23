@@ -48,3 +48,28 @@ def classify_expert_action(action: ExpertAction) -> LabelCategory:
     if kind == "activate_ability":
         return LabelCategory.SINGLE_ABILITY
     return LabelCategory.MALFORMED
+
+
+def validate_label_supervision(
+    category: LabelCategory,
+    supervision: Any,
+    trainable: bool,
+    config: Any,
+) -> None:
+    """Reject cached label metadata that violates the pinned head policy."""
+
+    from .config import supervision_for
+
+    selected_category = LabelCategory(category)
+    if type(trainable) is not bool:
+        raise ValueError("compiled label trainable flag must be boolean")
+    expected_supervision = supervision_for(selected_category, config)
+    if supervision != expected_supervision:
+        raise ValueError(
+            f"compiled label supervision differs from the approved policy for {selected_category.value}"
+        )
+    expected_trainable = config.supports(selected_category)
+    if trainable is not expected_trainable:
+        raise ValueError(
+            f"compiled label trainability differs from the approved policy for {selected_category.value}"
+        )

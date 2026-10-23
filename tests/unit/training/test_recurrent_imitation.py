@@ -11,6 +11,7 @@ from elixir_echo.integrations.firstlight.trainer import FirstLightILTrainer
 from elixir_echo.datasets.trajectory import TrainingEpisode
 from elixir_echo.training.config import HeadSupervision, TrainingConfig
 from elixir_echo.training.labels import CompiledLabel, LabelCategory
+from elixir_echo.profiles import ObservationProfile
 
 
 @dataclass(frozen=True)
@@ -202,6 +203,8 @@ def test_training_pass_uses_only_train_terminated_episodes_and_resets_per_actor(
         return SimpleNamespace(
             episode_id=episode.episode_id,
             actor=actor,
+            profile=ObservationProfile.RICH,
+            inputs=(object(),) * len(labels),
             labels=labels,
             trainable_count=2,
         )
@@ -252,6 +255,8 @@ def test_training_pass_stops_consuming_episodes_at_requested_limit(monkeypatch):
         lambda episode, *, actor, **_kwargs: SimpleNamespace(
             episode_id=episode.episode_id,
             actor=actor,
+            profile=ObservationProfile.RICH,
+            inputs=(object(),) * len(labels),
             labels=labels,
             trainable_count=1,
         ),
@@ -277,6 +282,48 @@ def test_training_pass_stops_consuming_episodes_at_requested_limit(monkeypatch):
     assert result.episode_count == 1
 
 
+def test_sequence_batch_trains_valid_actor_lanes_in_order_with_one_optimizer():
+    from elixir_echo.datasets.sequence import SequenceBatch
+    from elixir_echo.profiles import ObservationProfile
+
+    lanes = (
+        SimpleNamespace(
+            episode_id="episode-a",
+            actor=0,
+            profile=ObservationProfile.RICH,
+            inputs=("a0-t0", "a0-t1"),
+            labels=("a0-y0", "a0-y1"),
+            trainable_count=2,
+        ),
+        SimpleNamespace(
+            episode_id="episode-a",
+            actor=1,
+            profile=ObservationProfile.RICH,
+            inputs=("a1-t0",),
+            labels=("a1-y0",),
+            trainable_count=1,
+        ),
+    )
+    batch = SequenceBatch.from_episode_groups((lanes,))
+    trainer = object.__new__(FirstLightILTrainer)
+    trainer.config = TrainingConfig()
+    trainer.backend = SimpleNamespace(model=object())
+    optimizer = object()
+    trained = []
+
+    def train_sequence(lane, *, optimizer):
+        trained.append((lane.actor, optimizer))
+        return SimpleNamespace(optimizer_steps=1)
+
+    trainer.train_sequence = train_sequence
+
+    results = trainer.train_sequence_batch(batch, optimizer=optimizer)
+
+    assert [item[0] for item in trained] == [0, 1]
+    assert all(item[1] is optimizer for item in trained)
+    assert len(results) == 2
+
+
 def test_training_pass_reports_but_does_not_train_actor_sequences_without_supported_labels(monkeypatch):
     from elixir_echo.integrations.firstlight import trainer as firstlight_trainer
 
@@ -288,6 +335,8 @@ def test_training_pass_reports_but_does_not_train_actor_sequences_without_suppor
         lambda episode, *, actor, **_kwargs: SimpleNamespace(
             episode_id=episode.episode_id,
             actor=actor,
+            profile=ObservationProfile.RICH,
+            inputs=(object(),) * len(unsupported),
             labels=unsupported,
             trainable_count=0,
         ),

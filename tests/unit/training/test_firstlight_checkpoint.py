@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from elixir_echo.domain.values import content_sha256
 from elixir_echo.integrations.firstlight.trainer import FirstLightILTrainer
 from elixir_echo.integrations.firstlight.trainer import TrainingRunProgress
 from elixir_echo.training.config import TrainingConfig
@@ -74,6 +75,9 @@ def test_checkpoint_round_trip_binds_config_contract_optimizer_and_step(tmp_path
     assert saved.checkpoint_id == "checkpoint-id-7"
     assert saved.update_step == 7
     assert manifest["training_config_fingerprint"] == trainer.config.fingerprint()
+    assert manifest["input_mode"] == "rich"
+    assert manifest["input_schema"] == "elixir_echo.firstlight-v4-policy-input@1"
+    assert manifest["data_split_fingerprint"] is None
     assert manifest["provider_contract"] == {"policy": "v4", "catalog": "fixture-catalog"}
     assert manifest["checkpoint_sha256"] == hashlib.sha256(checkpoint_file.read_bytes()).hexdigest()
     assert module.save_calls[0][2]["optimizer"] is optimizer
@@ -93,6 +97,74 @@ def test_checkpoint_rejects_config_mismatch_before_loading_model(tmp_path):
 
     with pytest.raises(ValueError, match="training configuration fingerprint"):
         incompatible.restore_checkpoint(destination)
+
+    assert module.load_calls == []
+
+
+def test_checkpoint_rejects_input_mode_mismatch_before_loading_model(tmp_path):
+    source_trainer, _, _ = _trainer(TrainingConfig(input_mode="rich"))
+    destination = tmp_path / "checkpoint-rich"
+    source_trainer.save_checkpoint(destination, update_step=7)
+    incompatible, module, _ = _trainer(TrainingConfig(input_mode="legacy_checkpoint"))
+
+    with pytest.raises(ValueError, match="training input mode"):
+        incompatible.restore_checkpoint(destination)
+
+    assert module.load_calls == []
+
+
+def test_checkpoint_v1_migrates_only_as_implicit_rich_input(tmp_path, monkeypatch):
+    trainer, module, _ = _trainer()
+    destination = tmp_path / "checkpoint-v1"
+    trainer.save_checkpoint(destination, update_step=7)
+    manifest_path = destination / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    legacy_config = trainer.config.legacy_checkpoint_dict()
+    legacy_contract = {
+        "schema": "elixir_echo.training-checkpoint@1",
+        "training_config": legacy_config,
+        "training_config_fingerprint": content_sha256(legacy_config),
+    }
+    manifest.update(legacy_contract)
+    for field in ("input_schema", "input_mode", "data_split_fingerprint"):
+        manifest.pop(field)
+    manifest_path.write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
+    payload = _fake_payload(trainer, module)
+    payload["extra"]["elixir_echo"] = legacy_contract
+    monkeypatch.setattr(trainer, "_read_checkpoint_payload", lambda _path: payload, raising=False)
+    monkeypatch.setattr(
+        module,
+        "load_actor_critic_checkpoint",
+        lambda *_args, **_kwargs: payload,
+    )
+
+    restored = trainer.restore_checkpoint(destination)
+
+    assert restored.checkpoint_id == "checkpoint-id-7"
+    assert trainer.config.input_mode == "rich"
+
+
+def test_checkpoint_v1_cannot_be_guessed_as_legacy_tensor_mode(tmp_path, monkeypatch):
+    trainer, module, _ = _trainer()
+    destination = tmp_path / "checkpoint-v1"
+    trainer.save_checkpoint(destination, update_step=7)
+    manifest_path = destination / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    legacy_config = trainer.config.legacy_checkpoint_dict()
+    manifest.update(
+        {
+            "schema": "elixir_echo.training-checkpoint@1",
+            "training_config": legacy_config,
+            "training_config_fingerprint": content_sha256(legacy_config),
+        }
+    )
+    for field in ("input_schema", "input_mode", "data_split_fingerprint"):
+        manifest.pop(field)
+    manifest_path.write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
+    legacy = _trainer(TrainingConfig(input_mode="legacy_checkpoint"))[0]
+
+    with pytest.raises(ValueError, match="only restore as RICH"):
+        legacy.restore_checkpoint(destination)
 
     assert module.load_calls == []
 
@@ -142,13 +214,34 @@ def test_checkpoint_directory_is_not_overwritten(tmp_path):
 def test_checkpoint_rejects_dataset_fingerprint_mismatch_before_loading(tmp_path):
     trainer, module, _ = _trainer()
     destination = tmp_path / "checkpoint-0007"
-    progress = TrainingRunProgress("dataset-a", 1, "0" * 64, 7)
+    progress = TrainingRunProgress("dataset-a", 1, "0" * 64, 7, "1" * 64)
     trainer.save_checkpoint(destination, update_step=7, progress=progress)
 
     with pytest.raises(ValueError, match="dataset fingerprint"):
         trainer.restore_checkpoint(
             destination,
             expected_dataset_fingerprint="dataset-b",
+        )
+
+    assert module.load_calls == []
+
+
+def test_checkpoint_rejects_full_split_assignment_mismatch_before_loading(tmp_path):
+    trainer, module, _ = _trainer()
+    destination = tmp_path / "checkpoint-with-split"
+    progress = TrainingRunProgress(
+        dataset_fingerprint="train-data-a",
+        completed_episode_count=1,
+        completed_episode_prefix_sha256="0" * 64,
+        optimizer_steps=7,
+        data_split_fingerprint="1" * 64,
+    )
+    trainer.save_checkpoint(destination, update_step=7, progress=progress)
+
+    with pytest.raises(ValueError, match="data-split fingerprint"):
+        trainer.restore_checkpoint(
+            destination,
+            expected_data_split_fingerprint="2" * 64,
         )
 
     assert module.load_calls == []

@@ -1,22 +1,51 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import os
+from dataclasses import fields, is_dataclass, replace
 
 import pytest
 
 torch = pytest.importorskip("torch")
 
-from elixir_echo.datasets.trajectory import TrainingEpisode, TrainingStep
-from elixir_echo.domain import ActionMask, DecisionIdentity, ExpertAction, Observation
+from elixir_echo.datasets.trajectory import (
+    TrainingEpisode,
+    TrainingStep,
+    TrajectoryEpisode,
+    TrajectoryManifest,
+    aggregate_record_hash,
+)
+from elixir_echo.domain import (
+    ActionMask,
+    DecisionIdentity,
+    DecisionStep,
+    ExpertAction,
+    Observation,
+)
+from elixir_echo.domain.values import content_sha256
 from elixir_echo.integrations.firstlight.il import compile_firstlight_actor_sequence
 from elixir_echo.integrations.firstlight.policy import FirstLightPolicyBackend
 from elixir_echo.integrations.firstlight.runtime import FirstLightRuntime
+from elixir_echo.integrations.firstlight.sequence_cache import (
+    FirstLightSequenceCacheError,
+    _HEADER,
+    _MAGIC,
+    decode_actor_sequence,
+    encode_actor_sequence,
+)
 from elixir_echo.integrations.firstlight.tensorizer import PolicyInputBuilder
 from elixir_echo.integrations.firstlight.trainer import FirstLightILTrainer, TrainingRunProgress
+from elixir_echo.datasets.sequence import (
+    Layer2SequenceCache,
+    SequenceDataset,
+    SequenceDatasetCompiler,
+)
 from elixir_echo.profiles import ObservationProfile
-from elixir_echo.training.config import TrainingConfig
+from elixir_echo.training.config import HeadSupervision, TrainingConfig
+from elixir_echo.training.labels import LabelCategory
+from elixir_echo.domain.values import canonical_json
 
 
 def _observation(actor: int) -> Observation:
@@ -103,8 +132,8 @@ def _mask(identity: DecisionIdentity) -> ActionMask:
     )
 
 
-def _step(tick: int, actor: int, action) -> TrainingStep:
-    identity = DecisionIdentity("il-smoke-episode", tick, actor)
+def _step(tick: int, actor: int, action, *, episode_id: str = "il-smoke-episode") -> TrainingStep:
+    identity = DecisionIdentity(episode_id, tick, actor)
     return TrainingStep(
         identity=identity,
         observation=_observation(actor),
@@ -112,6 +141,57 @@ def _step(tick: int, actor: int, action) -> TrainingStep:
         expert_action=ExpertAction.from_legacy(action),
         event_delta=(),
     )
+
+
+def _trajectory_episode(episode: TrainingEpisode) -> TrajectoryEpisode:
+    metadata = {
+        "episode_id": episode.episode_id,
+        "replay_tag": "firstlight-sequence-cache-smoke",
+        "outcome": episode.outcome,
+        "split": episode.split,
+        "episode_context_ref": "c" * 64,
+    }
+    records = tuple(
+        DecisionStep(
+            identity=step.identity,
+            episode_context_ref=metadata["episode_context_ref"],
+            observation=step.observation,
+            action_mask=step.action_mask,
+            expert_action=step.expert_action,
+            event_delta=step.event_delta,
+            validation={"accepted": True},
+            fingerprints={"semantic_frame_schema": "synthetic-smoke"},
+        )
+        for step in episode.steps
+    )
+    record_hashes = tuple(item.content_sha256() for item in records)
+    manifest = TrajectoryManifest(
+        episode_id=episode.episode_id,
+        replay_tag=metadata["replay_tag"],
+        outcome=episode.outcome,
+        first_tick=records[0].identity.tick,
+        last_tick=records[-1].identity.tick,
+        record_count=len(records),
+        record_hashes=record_hashes,
+        aggregate_hash=aggregate_record_hash(episode.episode_id, record_hashes),
+        metadata_sha256=content_sha256(metadata),
+        split=episode.split,
+    )
+    return TrajectoryEpisode(manifest, records, metadata)
+
+
+def _tensor_fields(value, *, prefix=""):
+    result = {}
+    for item in fields(value):
+        child = getattr(value, item.name)
+        key = f"{prefix}.{item.name}" if prefix else item.name
+        if torch.is_tensor(child):
+            result[key] = child
+        elif is_dataclass(child):
+            result.update(_tensor_fields(child, prefix=key))
+        else:
+            raise AssertionError(f"non-tensor V4 field in smoke record: {key}")
+    return result
 
 
 @pytest.mark.firstlight
@@ -195,6 +275,7 @@ def test_full_profile_sequence_runs_firstlight_v4_il_and_checkpoint_roundtrip(tm
         completed_episode_count=1,
         completed_episode_prefix_sha256=prefix_digest,
         optimizer_steps=recurrent_result.optimizer_steps,
+        data_split_fingerprint="d" * 64,
     )
     saved = trainer.save_checkpoint(
         checkpoint_path,
@@ -210,6 +291,7 @@ def test_full_profile_sequence_runs_firstlight_v4_il_and_checkpoint_roundtrip(tm
         checkpoint_path,
         optimizer=optimizer,
         expected_dataset_fingerprint="synthetic-cache-fingerprint",
+        expected_data_split_fingerprint="d" * 64,
     )
 
     actual_parameters = torch.nn.utils.parameters_to_vector(backend.model.parameters()).detach()
@@ -218,3 +300,186 @@ def test_full_profile_sequence_runs_firstlight_v4_il_and_checkpoint_roundtrip(tm
     assert saved.checkpoint_id == restored.checkpoint_id
     assert restored.update_step == recurrent_result.optimizer_steps
     assert restored.progress == progress
+
+
+@pytest.mark.firstlight
+@pytest.mark.skipif(
+    os.environ.get("ELIXIR_ECHO_RUN_TRAINING_SMOKE") != "1",
+    reason="set ELIXIR_ECHO_RUN_TRAINING_SMOKE=1 to opt in to FirstLight sequence cache checks",
+)
+def test_firstlight_compiled_sequence_layer2_cache_roundtrip(tmp_path):
+    root = os.environ.get("ELIXIR_ECHO_FIRSTLIGHT_ROOT")
+    if not root:
+        pytest.skip("set ELIXIR_ECHO_FIRSTLIGHT_ROOT to run the FirstLight sequence-cache smoke")
+    runtime = FirstLightRuntime(root)
+    backend = FirstLightPolicyBackend(runtime, device="cpu")
+    config = TrainingConfig(profile=ObservationProfile.RICH, tbptt_length=1)
+    play = {
+        "kind": "play_card",
+        "owner": 0,
+        "card_id": 26_000_001,
+        "hand_slot": 1,
+        "target_kind": "grid",
+        "target_grid": [8, 10],
+        "execute_offset_ticks": 0,
+    }
+    episode = TrainingEpisode(
+        episode_id="layer2-smoke-episode",
+        outcome="terminated",
+        split="train",
+        steps=(
+            _step(90, 0, play, episode_id="layer2-smoke-episode"),
+            _step(90, 1, None, episode_id="layer2-smoke-episode"),
+            _step(95, 0, None, episode_id="layer2-smoke-episode"),
+            _step(95, 1, None, episode_id="layer2-smoke-episode"),
+        ),
+    )
+    input_builder = PolicyInputBuilder(runtime, components=backend.components)
+    with pytest.raises(ValueError, match="input builder mode"):
+        compile_firstlight_actor_sequence(
+            episode,
+            actor=0,
+            input_builder=input_builder,
+            components=backend.components,
+            config=replace(config, input_mode="legacy_checkpoint"),
+        )
+    compiled_sequences = []
+    encoded_by_actor = {}
+
+    def compile_actor(training_episode, actor):
+        sequence = compile_firstlight_actor_sequence(
+            training_episode,
+            actor=actor,
+            input_builder=input_builder,
+            components=backend.components,
+            config=config,
+        )
+        compiled_sequences.append(sequence)
+        return sequence
+
+    def encode_sequence(sequence):
+        payload = encode_actor_sequence(sequence, training_config=config)
+        encoded_by_actor[sequence.actor] = payload
+        return payload
+
+    fingerprint = "a" * 64
+    input_fingerprint = hashlib.sha256(b"synthetic composer and V4 contract").hexdigest()
+    cache = Layer2SequenceCache(tmp_path / "layer2")
+    source_episode = _trajectory_episode(episode)
+    compiler = SequenceDatasetCompiler(
+        cache=cache,
+        dataset_fingerprint=fingerprint,
+        training_config_fingerprint=config.fingerprint(),
+        input_contract_fingerprint=input_fingerprint,
+        profile=ObservationProfile.RICH,
+        actor_sequence_compiler=compile_actor,
+        actor_sequence_encoder=encode_sequence,
+    )
+    manifest = compiler.compile_episode(source_episode)
+    sequences = tuple(compiled_sequences)
+    encoded = tuple(encoded_by_actor[actor] for actor in (0, 1))
+    assert manifest["source_episode_sha256"] == source_episode.manifest.content_sha256()
+    incompatible_mode = replace(config, input_mode="legacy_checkpoint")
+    with pytest.raises(FirstLightSequenceCacheError, match="input mode"):
+        encode_actor_sequence(sequences[0], training_config=incompatible_mode)
+    with pytest.raises(FirstLightSequenceCacheError, match="input mode"):
+        decode_actor_sequence(
+            encoded[0],
+            runtime,
+            components=backend.components,
+            training_config=incompatible_mode,
+        )
+    decoded = tuple(
+        decode_actor_sequence(
+            payload,
+            runtime,
+            components=backend.components,
+            training_config=config,
+        )
+        for payload in encoded
+    )
+
+    for original, restored in zip(sequences, decoded, strict=True):
+        assert restored.identities == original.identities
+        assert restored.profile == original.profile
+        assert restored.label_counts == original.label_counts
+        for original_input, restored_input in zip(original.inputs, restored.inputs, strict=True):
+            assert original_input.action_mask is not restored_input.action_mask
+            assert restored_input.action_mask is None
+            assert restored_input.temporal_context is None
+            original_tensors = _tensor_fields(original_input.tensors.batch)
+            restored_tensors = _tensor_fields(restored_input.tensors.batch)
+            assert original_tensors.keys() == restored_tensors.keys()
+            assert all(torch.equal(original_tensors[key], restored_tensors[key]) for key in original_tensors)
+        for original_label, restored_label in zip(original.labels, restored.labels, strict=True):
+            assert original_label.category == restored_label.category
+            assert original_label.supervision == restored_label.supervision
+            original_tensors = _tensor_fields(original_label.action)
+            restored_tensors = _tensor_fields(restored_label.action)
+            assert original_tensors.keys() == restored_tensors.keys()
+            assert all(torch.equal(original_tensors[key], restored_tensors[key]) for key in original_tensors)
+
+    forged_label = replace(
+        sequences[0].labels[0],
+        category=LabelCategory.SINGLE_ABILITY,
+        supervision=HeadSupervision(gate=True),
+        trainable=True,
+    )
+    forged_sequence = replace(
+        sequences[0],
+        labels=(forged_label, *sequences[0].labels[1:]),
+    )
+    with pytest.raises(FirstLightSequenceCacheError, match="approved policy"):
+        encode_actor_sequence(forged_sequence, training_config=config)
+
+    magic, metadata_length = _HEADER.unpack_from(encoded[0])
+    assert magic == _MAGIC
+    metadata_start = _HEADER.size
+    metadata_end = metadata_start + metadata_length
+    cached_metadata = json.loads(encoded[0][metadata_start:metadata_end])
+    cached_metadata["frames"][0]["category"] = LabelCategory.SINGLE_ABILITY.value
+    cached_metadata["frames"][0]["trainable"] = True
+    cached_metadata["frames"][0]["supervision"] = {
+        "gate": True,
+        "candidate": False,
+        "target": False,
+        "continue_action": False,
+        "delay": False,
+        "value": False,
+    }
+    forged_metadata_bytes = canonical_json(cached_metadata).encode("utf-8")
+    forged_payload = (
+        _HEADER.pack(_MAGIC, len(forged_metadata_bytes))
+        + forged_metadata_bytes
+        + encoded[0][metadata_end:]
+    )
+    with pytest.raises(FirstLightSequenceCacheError, match="approved policy"):
+        decode_actor_sequence(
+            forged_payload,
+            runtime,
+            components=backend.components,
+            training_config=config,
+        )
+
+    dataset = SequenceDataset.from_layer2_cache(
+        cache,
+        sequence_decoder=lambda item: tuple(
+            decode_actor_sequence(
+                payload,
+                runtime,
+                components=backend.components,
+                training_config=config,
+            )
+            for payload in item.actor_payloads
+        ),
+        selected_episode_ids=(episode.episode_id,),
+        episode_splits={episode.episode_id: "train"},
+        dataset_fingerprint=fingerprint,
+        training_config_fingerprint=config.fingerprint(),
+        input_contract_fingerprint=input_fingerprint,
+    )
+    loaded = tuple(dataset)
+    assert [(item.episode_id, item.actor) for item in loaded] == [
+        (episode.episode_id, 0),
+        (episode.episode_id, 1),
+    ]

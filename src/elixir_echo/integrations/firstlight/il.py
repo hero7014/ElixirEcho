@@ -157,6 +157,10 @@ def compile_firstlight_actor_sequence(
 ) -> CompiledActorSequence:
     """Bind the provider-neutral sequence compiler to FirstLight V4 labels."""
 
+    input_mode = getattr(getattr(input_builder, "tensorizer", None), "input_mode", None)
+    if input_mode != config.input_mode:
+        raise ValueError("input builder mode differs from the fingerprinted TrainingConfig")
+
     def label_compiler(step, policy_input, selected_config, profile):
         return compile_expert_label(
             step,

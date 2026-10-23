@@ -425,7 +425,10 @@ class ObservationTensorizer:
                         continue
                     remaining, stacks, magnitude = effect.get("remaining_ms"), effect.get("stacks"), effect.get("magnitude")
                     runtime = (
-                        min(_number(remaining, 10_000), 30.0),
+                        min(
+                            _number(remaining, 10_000),
+                            10.0 if self.input_mode == "legacy_checkpoint" else 30.0,
+                        ),
                         float(isinstance(remaining, (int, float)) and not isinstance(remaining, bool)),
                         float(remaining is None),
                         _number(stacks, 10),

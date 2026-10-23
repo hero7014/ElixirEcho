@@ -64,6 +64,7 @@ def test_episode_checkpoint_runner_resumes_from_last_atomic_boundary(monkeypatch
             input_builder=object(),
             optimizer=object(),
             dataset_fingerprint="cache-fingerprint",
+            data_split_fingerprint="e" * 64,
             checkpoint_directory=tmp_path,
             checkpoint_every=2,
         )
@@ -79,13 +80,13 @@ def test_episode_checkpoint_runner_resumes_from_last_atomic_boundary(monkeypatch
     monkeypatch.setattr(
         trainer,
         "_read_checkpoint_progress",
-        lambda path, *, expected_dataset_fingerprint: resumed_checkpoint.progress,
+        lambda path, *, expected_dataset_fingerprint, expected_data_split_fingerprint: resumed_checkpoint.progress,
     )
     restore_calls = []
     monkeypatch.setattr(
         trainer,
         "restore_checkpoint",
-        lambda path, *, optimizer, expected_dataset_fingerprint: (
+        lambda path, *, optimizer, expected_dataset_fingerprint, expected_data_split_fingerprint: (
             restore_calls.append(path) or resumed_checkpoint
         ),
     )
@@ -96,6 +97,7 @@ def test_episode_checkpoint_runner_resumes_from_last_atomic_boundary(monkeypatch
             input_builder=object(),
             optimizer=object(),
             dataset_fingerprint="cache-fingerprint",
+            data_split_fingerprint="e" * 64,
             checkpoint_directory=tmp_path,
             checkpoint_every=2,
             resume_from=resumed_checkpoint.path,
@@ -107,6 +109,7 @@ def test_episode_checkpoint_runner_resumes_from_last_atomic_boundary(monkeypatch
         input_builder=object(),
         optimizer=object(),
         dataset_fingerprint="cache-fingerprint",
+        data_split_fingerprint="e" * 64,
         checkpoint_directory=tmp_path,
         checkpoint_every=2,
         resume_from=resumed_checkpoint.path,
@@ -125,5 +128,6 @@ def test_episode_checkpoint_runner_resumes_from_last_atomic_boundary(monkeypatch
             ("episode-1", "episode-2", "episode-3", "episode-4")
         ),
         optimizer_steps=8,
+        data_split_fingerprint="e" * 64,
     )
 

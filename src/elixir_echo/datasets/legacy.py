@@ -31,6 +31,7 @@ class LegacyTrainingCatalog:
     """Manifest-only inventory plus the capped eligible training prefix."""
 
     selected_episode_ids: tuple[str, ...]
+    split_assignments: dict[str, str]
     split_counts: dict[str, int]
     outcome_counts: dict[str, int]
     split_outcome_counts: dict[str, int]
@@ -272,6 +273,7 @@ class LegacyTrainingTrajectoryStoreReader:
             raise ValueError("legacy split manifest contains invalid episode assignments")
         return LegacyTrainingCatalog(
             selected_episode_ids=tuple(selected),
+            split_assignments=dict(sorted(split_payload["assignments"].items())),
             split_counts=dict(sorted(split_counts.items())),
             outcome_counts=dict(sorted(outcome_counts.items())),
             split_outcome_counts=dict(sorted(split_outcome_counts.items())),

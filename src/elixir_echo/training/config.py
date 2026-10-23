@@ -12,6 +12,8 @@ from .labels import LabelCategory
 
 
 _FIRST_PASS_LABELS = (LabelCategory.WAIT, LabelCategory.SINGLE_PLAY_CARD)
+_INPUT_SCHEMA = "elixir_echo.firstlight-v4-policy-input@1"
+_INPUT_MODES = frozenset({"rich", "legacy_checkpoint"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,6 +21,7 @@ class TrainingConfig:
     """Identify the model-facing profile, supported labels, and IL objective."""
 
     profile: ObservationProfile = ObservationProfile.RICH
+    input_mode: str = "rich"
     supported_label_categories: tuple[LabelCategory, ...] = _FIRST_PASS_LABELS
     gate_loss_weight: float = 1.0
     candidate_loss_weight: float = 1.0
@@ -36,6 +39,8 @@ class TrainingConfig:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "profile", ObservationProfile(self.profile))
+        if not isinstance(self.input_mode, str) or self.input_mode not in _INPUT_MODES:
+            raise ValueError("input_mode must be rich or legacy_checkpoint")
         categories = tuple(LabelCategory(item) for item in self.supported_label_categories)
         object.__setattr__(self, "supported_label_categories", categories)
         if len(set(categories)) != len(categories):
@@ -78,6 +83,8 @@ class TrainingConfig:
         }
         return {
             "profile": self.profile.value,
+            "input_schema": _INPUT_SCHEMA,
+            "input_mode": self.input_mode,
             "supported_label_categories": [item.value for item in self.supported_label_categories],
             "supervision_masks": supervision_masks,
             "loss_weights": {
@@ -98,6 +105,14 @@ class TrainingConfig:
             "max_grad_norm": float(self.max_grad_norm),
             "tbptt_length": self.tbptt_length,
         }
+
+    def legacy_checkpoint_dict(self) -> dict[str, Any]:
+        """Return the pre-input-mode config used by immutable checkpoint V1."""
+
+        values = self.to_dict()
+        values.pop("input_schema")
+        values.pop("input_mode")
+        return values
 
     def fingerprint(self) -> str:
         return content_sha256(self.to_dict())

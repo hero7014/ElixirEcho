@@ -103,8 +103,9 @@ def test_evolved_entity_uses_active_evolution_when_current_form_is_not_applicabl
     assert decision.batch.groups.runtime_form[0, 0].item() == tensorizer.FORM_EVOLUTION
 
 
-def test_historical_checkpoint_mode_zeros_only_legacy_reserved_child_channels(runtime) -> None:
+def test_historical_checkpoint_mode_preserves_effect_cap_and_zeros_reserved_channels(runtime) -> None:
     profile = _profile(rich=True)
+    profile["entities"][0]["effects"][0]["remaining_ms"] = 179_800
     profile["entities"][0]["visibility"] = {
         "targetable_by_owner": {"0": True},
         "area_damage_eligible": True,
@@ -118,6 +119,8 @@ def test_historical_checkpoint_mode_zeros_only_legacy_reserved_child_channels(ru
 
     assert rich.batch.groups.child_features[:, :, 36:45].count_nonzero().item() > 0
     assert legacy.batch.groups.child_features[:, :, 36:45].count_nonzero().item() == 0
+    assert rich.batch.active_effects.runtime_features[0, 0, 0].item() == pytest.approx(17.98)
+    assert legacy.batch.active_effects.runtime_features[0, 0, 0].item() == pytest.approx(10.0)
     torch.testing.assert_close(
         legacy.batch.groups.child_features[:, :, :36],
         rich.batch.groups.child_features[:, :, :36],
