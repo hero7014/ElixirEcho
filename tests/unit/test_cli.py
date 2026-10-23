@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -204,3 +205,78 @@ def test_train_firstlight_rejects_missing_episode_store(tmp_path: Path, capsys) 
     captured = capsys.readouterr()
     assert result == 2
     assert "episodes directory" in captured.err
+
+
+def test_compile_preflight_verifies_trajectory_inputs_without_writing_layer2(
+    tmp_path: Path, capsys
+) -> None:
+    _write_episode(tmp_path)
+
+    result = main(["compile", str(tmp_path)])
+
+    report = json.loads(capsys.readouterr().out)
+    assert result == 0
+    assert report["mode"] == "verified_inputs_only"
+    assert report["episode_count"] == 1
+    assert report["record_count"] == 2
+    assert not (tmp_path / "layer2").exists()
+
+
+def test_compile_requires_explicit_firstlight_configuration_before_writing(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    _write_episode(tmp_path)
+    monkeypatch.delenv("ELIXIR_ECHO_FIRSTLIGHT_ROOT", raising=False)
+
+    result = main(["compile", str(tmp_path), "--run"])
+
+    captured = capsys.readouterr()
+    assert result == 2
+    assert "set --firstlight-root or ELIXIR_ECHO_FIRSTLIGHT_ROOT" in captured.err
+    assert not (tmp_path / "layer2_sequence_cache").exists()
+
+
+def test_inspect_checkpoint_verifies_weights_hash_without_loading_model(
+    tmp_path: Path, capsys
+) -> None:
+    checkpoint = tmp_path / "checkpoint"
+    checkpoint.mkdir()
+    weights = b"synthetic-not-a-model"
+    (checkpoint / "weights.pt").write_bytes(weights)
+    (checkpoint / "manifest.json").write_text(
+        json.dumps(
+            {
+                "schema": "elixir_echo.training-checkpoint@1",
+                "checkpoint_id": "fixture-id",
+                "update_step": 7,
+                "input_mode": "rich",
+                "training_config_fingerprint": "f" * 64,
+                "weights_file": "weights.pt",
+                "checkpoint_sha256": hashlib.sha256(weights).hexdigest(),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = main(["inspect-checkpoint", str(checkpoint)])
+
+    report = json.loads(capsys.readouterr().out)
+    assert result == 0
+    assert report["status"] == "verified"
+    assert report["loaded_into_model"] is False
+    assert report["checkpoint_id"] == "fixture-id"
+
+
+def test_inspect_checkpoint_rejects_path_traversal_in_manifest(tmp_path: Path, capsys) -> None:
+    checkpoint = tmp_path / "checkpoint"
+    checkpoint.mkdir()
+    (checkpoint / "manifest.json").write_text(
+        json.dumps({"weights_file": "../outside.pt"}),
+        encoding="utf-8",
+    )
+
+    result = main(["inspect-checkpoint", str(checkpoint)])
+
+    captured = capsys.readouterr()
+    assert result == 2
+    assert "unsafe weights_file" in captured.err

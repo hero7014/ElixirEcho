@@ -1,0 +1,16 @@
+[paths]
+data_root = "../data"
+firstlight_root = ""
+dataset_path = "../data/full_episode_cache"
+output_path = "../runs"
+mumu_manager_path = ""
+game_assets_path = ""
+adb_executable = "adb"
+device_serial = ""
+
+[runtime]
+device = "cpu"
+
+[training]
+max_episodes = 1
+checkpoint_every = 10
