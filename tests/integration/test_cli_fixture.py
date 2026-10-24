@@ -76,7 +76,7 @@ def test_doctor_reports_missing_optional_assets_with_actionable_setup(tmp_path: 
     assert "ELIXIR_ECHO_ADB_EXECUTABLE" in diagnostics
 
 
-def test_capture_fails_clearly_when_native_runtime_is_not_configured(
+def test_capture_preflight_reports_missing_runtime_without_starting_native(
     tmp_path: Path,
 ) -> None:
     result = subprocess.run(
@@ -88,13 +88,25 @@ def test_capture_fails_clearly_when_native_runtime_is_not_configured(
         check=False,
     )
 
+    assert result.returncode == 0, result.stderr
+    report = json.loads(result.stdout)
+    assert report["mode"] == "preflight_only"
+    assert report["ready"] is False
+    assert {item["name"] for item in report["checks"] if not item["ready"]} >= {
+        "firstlight_root", "replay_dataset", "replay_tag"
+    }
+    assert not (tmp_path / "data").exists()
+
+
+def test_capture_run_requires_an_explicit_source_identity(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [sys.executable, "-m", "elixir_echo.cli", "capture", "--run"],
+        cwd=tmp_path,
+        env=_clean_cli_environment(),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
     assert result.returncode == 2
-    for required in (
-        "ELIXIR_ECHO_FIRSTLIGHT_ROOT",
-        "ELIXIR_ECHO_GAME_ASSETS_PATH",
-        "ELIXIR_ECHO_MUMU_MANAGER_PATH",
-        "ELIXIR_ECHO_ADB_EXECUTABLE",
-        "ELIXIR_ECHO_DEVICE_SERIAL",
-    ):
-        assert required in result.stderr
-    assert "C:\\Users\\feng" not in result.stderr
+    assert "capture --run requires" in result.stderr
+    assert "replay_tag" in result.stderr

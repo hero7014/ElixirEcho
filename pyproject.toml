@@ -18,6 +18,9 @@ firstlight-cache = [
   "safetensors>=0.4",
   "zstandard>=0.22",
 ]
+firstlight-capture = [
+  "pyarrow",
+]
 
 [project.scripts]
 elixir-echo = "elixir_echo.cli:main"

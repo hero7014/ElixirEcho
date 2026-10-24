@@ -54,9 +54,16 @@ def _parser() -> argparse.ArgumentParser:
 
     capture = commands.add_parser(
         "capture",
-        help="check replay-capture prerequisites; does not launch MuMu or Native",
+        help="check or explicitly capture one exact Native replay (--run required)",
     )
     _add_config_option(capture)
+    capture.add_argument("--replay-dataset", type=Path, help="IL_Replay dataset root containing replays/*.parquet")
+    capture.add_argument("--replay-tag", help="exact source replay identity; required with --run")
+    capture.add_argument("--firstlight-root", type=Path, help="read-only FirstLight checkout")
+    capture.add_argument("--output", type=Path, help="trajectory cache root")
+    capture.add_argument("--host", default="127.0.0.1", help="already-running Native control host")
+    capture.add_argument("--port", type=int, default=26789, help="already-running Native control port")
+    capture.add_argument("--run", action="store_true", help="connect to Native and capture the selected replay")
 
     compile_command = commands.add_parser("compile", help="compile bounded Layer 2 V4 sequences (explicit --run required)")
     _add_config_option(compile_command)
@@ -265,15 +272,65 @@ def _doctor(args: argparse.Namespace) -> dict[str, object]:
 
 
 def _capture_preflight(args: argparse.Namespace) -> dict[str, object]:
-    report = _doctor(args)
-    required = {"firstlight_root", "game_assets_path", "mumu_manager_path", "adb_executable", "device_serial"}
-    missing = [item for item in report["checks"] if item["name"] in required and item["status"] != "ready"]
+    config = _config(args, firstlight_root=args.firstlight_root)
+    source = (args.replay_dataset or config.data_root / "raw" / "IL_Replay").expanduser().resolve()
+    output = (args.output or config.data_root / "trajectory_cache").expanduser().resolve()
+    provider = config.firstlight_root
+    read_only_roots = [source]
+    if source.name == "IL_Replay" and source.parent.name == "raw" and source.parent.parent.name == "data":
+        inferred_source_project = source.parents[2]
+        if (inferred_source_project / "src" / "semantic_frame" / "firstlight_full_episode.py").is_file():
+            read_only_roots.append(inferred_source_project)
+    checks = [
+        {"name": "replay_dataset", "ready": (source / "replays").is_dir(), "path": str(source)},
+        {"name": "firstlight_root", "ready": provider is not None and (provider / "native_runner" / "__init__.py").is_file(), "path": str(provider) if provider else None},
+        {"name": "replay_tag", "ready": bool(args.replay_tag), "value": args.replay_tag},
+        {"name": "native_endpoint", "ready": bool(args.host) and 1 <= args.port <= 65535, "host": args.host, "port": args.port},
+    ]
+    if any(output == root or output.is_relative_to(root) for root in read_only_roots) or (
+        provider is not None and (output == provider or output.is_relative_to(provider))
+    ):
+        raise ValueError("capture output must be outside read-only inputs")
+    report: dict[str, object] = {
+        "schema": "elixir_echo.capture_preflight@1",
+        "mode": "preflight_only",
+        "ready": all(item["ready"] for item in checks),
+        "checks": checks,
+        "output": str(output),
+        "native_reachability": "not_checked",
+        "note": "Configuration only: Native reachability was not checked and no replay/output was created.",
+    }
+    if not args.run:
+        return report
+    missing = [item["name"] for item in checks if not item["ready"]]
     if missing:
-        details = "; ".join(f"{item['name']}: {item.get('action', 'not configured')}" for item in missing)
-        raise ValueError(f"capture prerequisites are incomplete: {details}")
-    report["mode"] = "preflight_only"
-    report["capture_note"] = "No Native process, emulator, or replay was launched; capture requires a prepared replay session."
-    return report
+        raise ValueError("capture --run requires: " + ", ".join(missing))
+
+    from elixir_echo.integrations.firstlight.capture import (
+        CaptureStageError,
+        ReplaySourceError,
+        capture_replay,
+        load_replay_payload,
+    )
+    from elixir_echo.integrations.firstlight.replay import ReplayCaptureError
+
+    try:
+        payload = load_replay_payload(source, args.replay_tag)
+        result = capture_replay(
+            payload, firstlight_root=provider, output_root=output,
+            host=args.host, port=args.port, read_only_roots=read_only_roots,
+        )
+    except (ReplaySourceError, ReplayCaptureError) as error:
+        layer = "source" if isinstance(error, ReplaySourceError) else error.layer
+        return {
+            "schema": "elixir_echo.capture_failure@1",
+            "mode": "failed",
+            "replay_tag": args.replay_tag,
+            "layer": layer,
+            "stage": error.stage if isinstance(error, CaptureStageError) else "source_selection" if isinstance(error, ReplaySourceError) else "frame_or_cache",
+            "reason": str(error),
+        }
+    return {"mode": "captured", **result.to_dict()}
 
 
 def _write_json(path: Path, payload: object) -> None:
@@ -591,7 +648,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"elixir-echo: {error}", file=sys.stderr)
         return 2
     print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
-    return 0
+    return 2 if args.command == "capture" and report.get("mode") == "failed" else 0
 
 
 if __name__ == "__main__":

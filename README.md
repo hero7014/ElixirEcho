@@ -24,10 +24,19 @@ foundation to investigate and train independent policies.
 - Causal public history and deterministic tracking, with unknown facts kept unknown.
 - Optional read-only FirstLight V4 adapters for tensorization, policy inference, and
   imitation-learning compatibility checks.
+- A fixed-replay capture command that reuses the earlier project's Native
+  reconstruction sequence and writes ElixirEcho trajectories atomically.
 - A read-only command for validating local trajectory caches.
 
 The core package has no runtime dependencies. Replay data, checkpoints, game assets, and
 machine-specific FirstLight paths are intentionally not included.
+
+The formal checkpoint discussed in this repository was trained in the earlier local
+research project. ElixirEcho has verified compatibility with that artifact; the
+packaged code does not imply that it trained the weights again.
+Historical checkpoint evaluation still calls that earlier project's read-only
+loader and evaluator. ElixirEcho's Tensorizer and training orchestration were
+adapted and partly rewritten for its own data contract.
 
 ## Quick start
 
@@ -58,6 +67,44 @@ uv run elixir-echo verify-trajectory "D:\path\to\trajectory-cache"
 The report intentionally excludes episode context, complete decks, provider diagnostics,
 and other audit-only metadata.
 
+## Capture one fixed replay
+
+Capture uses the existing FirstLight Native runner and the same preparation,
+calibration, battle reset, and expert-command scheduling sequence used in the
+earlier research project. It writes through ElixirEcho's `TrajectoryWriter`.
+FirstLight must be running and reachable at its control host and port before
+`--run`; this command connects to it but does not launch MuMu itself.
+
+Install the optional Parquet reader and supply your own FirstLight checkout and
+IL_Replay dataset. First inspect the paths without starting capture:
+
+```powershell
+uv sync --extra dev --extra firstlight-capture
+uv run elixir-echo capture `
+  --replay-dataset "<local-IL_Replay-root>" `
+  --replay-tag "<exact-replay-tag>" `
+  --firstlight-root "<local-FirstLight-checkout>" `
+  --output "<new-trajectory-cache-root>"
+```
+
+The report must say `ready: true` for its path and argument checks; it reports
+Native reachability as `not_checked`. Add `--run` to connect to the Native
+service and capture exactly that replay.
+The command never substitutes another replay if the identity is missing or
+rejected. It captures both actors every five ticks from tick 90 through a
+trusted terminal or truncation and verifies the complete episode before its
+atomic commit. Output must be outside the input data and FirstLight checkout.
+The new `capture --run` path has simulated call-order tests but has not yet
+completed a real Native replay end to end.
+Source data, game assets, and Native setup are user-supplied and are not
+distributed in this repository.
+
+The older sealed cache remains readable through the compatibility reader, so
+capturing a new replay is unnecessary merely to examine or verify the existing
+training work. See [architecture](docs/architecture.md),
+[reproducibility](docs/reproducibility.md), and the
+[data card](docs/data-card.md) for the ownership and validation boundaries.
+
 ## Plan or run a capped FirstLight training pass
 
 The training command first verifies the trajectory store and builds a stable fingerprint
@@ -69,7 +116,7 @@ create a model, or write checkpoints.
 ```powershell
 uv run elixir-echo train-firstlight `
   "D:\path\to\trajectory-cache" `
-  --firstlight-root "D:\path\to\FirstLight_CR" `
+  --firstlight-root "<local-FirstLight-checkout>" `
   --checkpoint-directory "D:\path\to\elixirecho-checkpoints" `
   --max-episodes 2
 ```
@@ -82,7 +129,7 @@ cuda` only after confirming the installed PyTorch build supports the intended GP
 ```powershell
 uv run elixir-echo train-firstlight `
   "D:\path\to\trajectory-cache" `
-  --firstlight-root "D:\path\to\FirstLight_CR" `
+  --firstlight-root "<local-FirstLight-checkout>" `
   --checkpoint-directory "D:\path\to\elixirecho-checkpoints" `
   --max-episodes 2 `
   --checkpoint-every 1 `
@@ -90,9 +137,9 @@ uv run elixir-echo train-firstlight `
   --run
 ```
 
-Training uses the RICH profile and the existing recurrent FirstLight V4 imitation-learning
-wrapper. This command is a capped research entry point, not a claim of model quality or a
-recommendation to start large-scale training.
+Training uses the RICH profile and external FirstLight V4 model and loss through
+ElixirEcho's training wrapper. This command is a capped research entry point,
+not a claim of model quality or a recommendation to start large-scale training.
 
 ## Optional FirstLight compatibility checks
 
@@ -100,7 +147,7 @@ FirstLight remains an external, read-only checkout. Install a PyTorch build appr
 for the local CPU/CUDA environment separately, then set the paths for the current shell:
 
 ```powershell
-$env:ELIXIR_ECHO_FIRSTLIGHT_ROOT = "D:\path\to\FirstLight_CR"
+$env:ELIXIR_ECHO_FIRSTLIGHT_ROOT = "<local-FirstLight-checkout>"
 $env:ELIXIR_ECHO_FIRSTLIGHT_CHECKPOINT = "D:\path\to\checkpoint-v1.pt"
 uv run pytest -q tests/compatibility/test_firstlight_checkpoint_logits.py
 ```
@@ -115,6 +162,8 @@ uv run pytest -q tests/integration/test_firstlight_il_smoke.py
 ```
 
 The runtime adapter disables bytecode writes into the configured FirstLight checkout.
+For a historical checkpoint with its original sealed test cache, use the
+[read-only evaluation procedure](docs/reproducibility.md#read-only-evaluation-of-a-historical-checkpoint).
 
 The FirstLight integration is based on the external
 [FirstLight CR project](https://github.com/Jaasssooooonnnn/FirstLight_CR), which is not
