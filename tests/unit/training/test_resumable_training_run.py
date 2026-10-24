@@ -5,6 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
+pytest.importorskip("torch")
+
 from elixir_echo.datasets.trajectory import TrainingEpisode
 from elixir_echo.integrations.firstlight.trainer import (
     FirstLightILTrainer,

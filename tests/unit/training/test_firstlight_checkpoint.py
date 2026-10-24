@@ -7,6 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 
+pytest.importorskip("torch")
+
 from elixir_echo.domain.values import content_sha256
 from elixir_echo.integrations.firstlight.trainer import FirstLightILTrainer
 from elixir_echo.integrations.firstlight.trainer import TrainingRunProgress
