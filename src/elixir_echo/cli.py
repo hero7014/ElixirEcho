@@ -64,6 +64,7 @@ def _parser() -> argparse.ArgumentParser:
     capture.add_argument("--host", default="127.0.0.1", help="already-running Native control host")
     capture.add_argument("--port", type=int, default=26789, help="already-running Native control port")
     capture.add_argument("--run", action="store_true", help="connect to Native and capture the selected replay")
+    capture.add_argument("--debug-train", action="store_true", help="assign train only inside an isolated runs/real-replay-chain directory")
 
     compile_command = commands.add_parser("compile", help="compile bounded Layer 2 V4 sequences (explicit --run required)")
     _add_config_option(compile_command)
@@ -272,6 +273,8 @@ def _doctor(args: argparse.Namespace) -> dict[str, object]:
 
 
 def _capture_preflight(args: argparse.Namespace) -> dict[str, object]:
+    if args.debug_train and not args.run:
+        raise ValueError("capture --debug-train requires --run")
     config = _config(args, firstlight_root=args.firstlight_root)
     source = (args.replay_dataset or config.data_root / "raw" / "IL_Replay").expanduser().resolve()
     output = (args.output or config.data_root / "trajectory_cache").expanduser().resolve()
@@ -319,6 +322,7 @@ def _capture_preflight(args: argparse.Namespace) -> dict[str, object]:
         result = capture_replay(
             payload, firstlight_root=provider, output_root=output,
             host=args.host, port=args.port, read_only_roots=read_only_roots,
+            debug_train=args.debug_train,
         )
     except (ReplaySourceError, ReplayCaptureError) as error:
         layer = "source" if isinstance(error, ReplaySourceError) else error.layer

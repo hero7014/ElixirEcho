@@ -163,9 +163,40 @@ def test_old_native_call_order_feeds_existing_atomic_trajectory_writer(tmp_path,
     assert result.decision_tick_count == 1
     assert result.record_count == result.label_leakage_checks == 2
     episode = TrajectoryReader(output).read_episode("r1")
+    assert episode.manifest.split is None
     assert [(step.identity.tick, step.identity.actor) for step in episode.records] == [(90, 0), (90, 1)]
     assert episode.records[0].expert_action.actions[0]["kind"] == "play_card"
     assert "expert-1" not in str(episode.records[0].observation.to_dict())
+
+
+def test_debug_capture_writes_isolated_train_split(tmp_path, monkeypatch):
+    runtime = _runtime_fixture(tmp_path)
+    monkeypatch.setattr(capture, "FirstLightRuntime", lambda _root: runtime)
+    monkeypatch.setattr(capture, "FirstLightObservationAdapter", lambda **_kwargs: _Adapter())
+    debug_root = tmp_path / "runs" / "real-replay-chain"
+    monkeypatch.setattr(capture, "_DEBUG_RUN_ROOT", debug_root)
+    output = debug_root / "one-run" / "trajectory"
+
+    capture.capture_replay(
+        _payload(), firstlight_root=runtime.root, output_root=output, debug_train=True
+    )
+
+    episode = TrajectoryReader(output).read_episode("r1")
+    assert episode.manifest.split == "train"
+    assert episode.metadata["split"] == "train"
+
+
+def test_debug_capture_rejects_output_outside_isolated_root_before_native(tmp_path, monkeypatch):
+    runtime = _runtime_fixture(tmp_path)
+    monkeypatch.setattr(capture, "FirstLightRuntime", lambda _root: runtime)
+    monkeypatch.setattr(capture, "_DEBUG_RUN_ROOT", tmp_path / "runs" / "real-replay-chain")
+    output = tmp_path / "formal-cache"
+
+    with pytest.raises(ValueError, match="debug capture output"):
+        capture.capture_replay(
+            _payload(), firstlight_root=runtime.root, output_root=output, debug_train=True
+        )
+    assert not output.exists()
 
 
 def test_provider_identity_mismatch_fails_before_any_episode_is_written(tmp_path, monkeypatch):

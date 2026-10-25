@@ -366,6 +366,7 @@ class FirstLightReplayProvider:
         replay_tag: str,
         episode_context: Mapping[str, Any],
         fingerprints: Mapping[str, Any],
+        split: str | None = None,
     ) -> TrajectoryManifest:
         """Commit a captured timeline; storage failures remain separately classifiable."""
 
@@ -381,6 +382,7 @@ class FirstLightReplayProvider:
                 "fingerprints": dict(fingerprints),
                 "decision_tick_count": captured.decision_tick_count,
                 "label_leakage_checks": captured.label_leakage_checks,
+                "split": split,
             })
             for record in captured.records:
                 writer.append(record)

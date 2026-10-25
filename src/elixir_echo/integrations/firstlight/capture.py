@@ -27,6 +27,9 @@ from elixir_echo.integrations.firstlight.replay import (
 from elixir_echo.integrations.firstlight.runtime import FirstLightRuntime
 
 
+_DEBUG_RUN_ROOT = Path(__file__).resolve().parents[4] / "runs" / "real-replay-chain"
+
+
 class ReplaySourceError(ValueError):
     """The requested source replay is absent, ambiguous, or unsuitable."""
 
@@ -246,6 +249,7 @@ def capture_replay(
     port: int = 26789,
     calibration_attempts: int = 10,
     read_only_roots: Iterable[Path] = (),
+    debug_train: bool = False,
 ) -> CaptureResult:
     """Reconstruct one fixed source replay and atomically publish its trajectory."""
 
@@ -257,6 +261,11 @@ def capture_replay(
         raise ValueError("invalid Native port or calibration attempt count")
     runtime = FirstLightRuntime(firstlight_root)
     _guard_output(output_root, runtime.root, *read_only_roots)
+    if debug_train:
+        debug_root = _DEBUG_RUN_ROOT.resolve()
+        output = output_root.resolve()
+        if output == debug_root or not output.is_relative_to(debug_root):
+            raise ValueError("debug capture output must be inside runs/real-replay-chain/<run-id>")
     before = _tree_snapshot(runtime.root)
     native = None
     failure: BaseException | None = None
@@ -377,6 +386,7 @@ def capture_replay(
     manifest = FirstLightReplayProvider.write_trajectory(
         captured, root=str(output_root), replay_tag=source_tag,
         episode_context=context, fingerprints=fingerprints,
+        split="train" if debug_train else None,
     )
     from elixir_echo.datasets.trajectory import TrajectoryReader
 

@@ -12,6 +12,37 @@ read-only adapter. ElixirEcho owns its domain contracts, observation profiles, c
 boundaries, temporal context, and integration layer; the long-term goal is to use this
 foundation to investigate and train independent policies.
 
+## Data flow
+
+```mermaid
+flowchart LR
+  Replay[Replay record] --> Native[FirstLight Native and BattleEnv]
+  Native --> Adapter[ElixirEcho capture adapter]
+  Adapter --> Frame[Actor-fair Observation and ActionMask]
+  Frame --> Trajectory[Atomic episode Trajectory]
+  Trajectory --> Temporal[History and public Tracker]
+  Temporal --> Tensorizer[RICH V4 Tensorizer]
+  Tensorizer --> Policy[FirstLight V4 policy and IL loss]
+  Policy --> Checkpoint[ElixirEcho training/checkpoint wrapper]
+```
+
+FirstLight supplies the external Native runner, BattleEnv, V4 encoders, recurrent
+policy, action heads, and core imitation-learning loss. ElixirEcho calls these
+components through adapters and supplies its own data contracts and training
+orchestration; FirstLight source and assets are not vendored. The earlier local
+research project produced the historical formal checkpoint and sealed evaluation
+data. Neither those weights nor the private data are included here.
+
+The [Demo/Results report](docs/demo-results.md) records one completed real-replay
+capture through two TBPTT updates and a debug-checkpoint reload. This is a pipeline
+smoke, not evidence of competitive play. Full batch production and a complete
+ElixirEcho dataset-training run remain unverified; gameplay strength is also
+unverified. The Native runner and V4 model/loss are upstream FirstLight components.
+The earlier project's sealed-test result
+is documented separately in the [model card](docs/model-card.md): 38 episodes,
+67,894 decision frames, and teacher-forced IL loss 6.0717. It is not an ElixirEcho
+retraining result or a gameplay win rate.
+
 ## What is here
 
 - Canonical game-agent concepts: `Observation`, `ActionMask`, `DecisionStep`,
@@ -33,7 +64,9 @@ machine-specific FirstLight paths are intentionally not included.
 
 The formal checkpoint discussed in this repository was trained in the earlier local
 research project. ElixirEcho has verified compatibility with that artifact; the
-packaged code does not imply that it trained the weights again.
+packaged code does not imply that it trained the weights again. The historical
+checkpoint's sealed-test result is reported in the model card and is distinct from
+the new single-replay debug run.
 Historical checkpoint evaluation still calls that earlier project's read-only
 loader and evaluator. ElixirEcho's Tensorizer and training orchestration were
 adapted and partly rewritten for its own data contract.
@@ -94,8 +127,11 @@ The command never substitutes another replay if the identity is missing or
 rejected. It captures both actors every five ticks from tick 90 through a
 trusted terminal or truncation and verifies the complete episode before its
 atomic commit. Output must be outside the input data and FirstLight checkout.
-The new `capture --run` path has simulated call-order tests but has not yet
-completed a real Native replay end to end.
+One fixed replay has completed this real Native capture path and the small
+training/checkpoint smoke described in the [Demo/Results report](docs/demo-results.md).
+This verifies that replay only; arbitrary replay acceptance and batch capture
+remain unverified. Use `--debug-train` only with an output inside the isolated
+`runs/real-replay-chain/<run-id>` directory.
 Source data, game assets, and Native setup are user-supplied and are not
 distributed in this repository.
 

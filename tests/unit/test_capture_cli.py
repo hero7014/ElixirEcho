@@ -33,7 +33,14 @@ def test_explicit_capture_dispatches_one_fixed_replay_without_native_in_test(tmp
     assert captured["payload"]["replay_tag"] == "fixed"
     assert captured["firstlight_root"] == firstlight
     assert captured["output_root"] == output
+    assert captured["debug_train"] is False
     assert not output.exists()
+
+
+def test_debug_train_flag_requires_run(tmp_path, capsys):
+    code = cli.main(["capture", "--debug-train", "--output", str(tmp_path / "unused")])
+    assert code == 2
+    assert "--run" in capsys.readouterr().err
 
 
 def test_capture_preflight_rejects_output_elsewhere_inside_legacy_project(tmp_path: Path, capsys):
