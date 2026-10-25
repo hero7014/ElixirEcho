@@ -87,6 +87,74 @@ The trajectory reader verification passed for one terminated episode and
 1,406 records. The existing 21 focused capture/CLI tests had passed before
 this real run; they were not rerun because no code changed during the run.
 
+## Historical formal checkpoint: fixed-replay prediction sample
+
+The earlier project's formal checkpoint was loaded read-only from its local
+path and evaluated through the existing FirstLight V4 `model.act` greedy
+decoder. ElixirEcho supplied RICH observations using
+`legacy_checkpoint` input mode. Both actor sequences were processed in tick
+order with separate recurrent state, reset at each actor's first frame. This
+was teacher-forced replay input: the recorded expert action was committed to
+public history only after that frame's model input and prediction had been
+formed. No game was simulated and no weights were changed.
+
+| Check | Result |
+| --- | ---: |
+| Replay / outcome | `86582cdb2f0f4e8c94e9d9540d75e4cb` / terminated |
+| Full sequence processed | 1,406 actor records (703 per actor) |
+| Displayed comparison points | 20 (10 ticks × 2 actors) |
+| Checkpoint SHA-256 | `49a76994020c49e60b3b7d90b7eaf7cc53ffaef3c679f3caa4130cb5c0c71548` |
+| Tensorized candidate-slot mappings checked against ActionMask | 4,130; 0 errors |
+| Frames where ActionMask allowed card play | 1,215 / 1,406 |
+| Model output at sampled points | WAIT at all 20 points |
+| Comparable WAIT / single-card labels | 12 / 16 matched; 4 single-card labels predicted as WAIT |
+| Ability / multi-action labels | 4 sampled records; outside this action-head comparison |
+
+Examples from actor 0 show the model's behavior and the current limits of the
+old action heads:
+
+| Tick | Expert action | Model output | Reading |
+| ---: | --- | --- | --- |
+| 90 | WAIT | WAIT | Match |
+| 245 | Play card `28000018`, slot 1, grid `[3,5]` | WAIT | Mismatch |
+| 425 | Play card `26000034`, slot 3, grid `[8,0]` | WAIT | Mismatch |
+| 830 | Activate ability | WAIT | Not comparable to the checkpoint's WAIT/single-card labels |
+| 1310 | Activate ability | WAIT | Not comparable; ActionMask reports ability available |
+| 2700 | Play card `28000012`, slot 1, grid `[3,18]` | WAIT | Mismatch |
+| 3505 | Two ability actions | WAIT | Not comparable to the checkpoint's action heads |
+| 3600 | WAIT | WAIT | Match |
+
+The decoder selected only ActionMask-backed candidates. For every selected
+candidate it checks the native hand slot, visible card ID, and predicted target
+grid against the same-tick ActionMask. Across the sequence, all 4,130
+candidate-to-slot/card/placement mappings passed. These checks establish the
+input and action decoding path; they do not establish policy quality. In
+particular, the formal checkpoint's training report records no delay-head
+supervision, so any decoded delay value must not be interpreted as learned
+timing behavior.
+
+The replay is assigned to `train` in the earlier Pilot20 split manifest. Its
+membership in the historical formal checkpoint's own train/validation/test
+sets could not be confirmed by matching the same identity. Therefore these
+sampled comparisons are **not claimed as held out** and are not a formal
+generalization evaluation. The fixed sample's 12/16 descriptive match count is
+not a win rate.
+
+To reproduce this local display, supply the saved trajectory, the compatible
+FirstLight checkout, and the old checkpoint (none are distributed here):
+
+```powershell
+$env:PYTHONPATH = "<ElixirEcho-root>\src"
+$env:PYTHONDONTWRITEBYTECODE = "1"
+& "<python-with-PyTorch>" "<ElixirEcho-root>\tools\demo_fixed_replay_predictions.py" `
+  --trajectory-root "<trajectory-store-root>" `
+  --replay-id "86582cdb2f0f4e8c94e9d9540d75e4cb" `
+  --firstlight-root "<FirstLight-checkout>" `
+  --checkpoint "<formal-checkpoint-v1.pt>" `
+  --output "<local-output.json>" `
+  --device cuda
+```
+
 ## Limits
 
 - This proves one fixed replay can flow through real Native capture, the
