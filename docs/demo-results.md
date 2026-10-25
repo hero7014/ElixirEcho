@@ -1,29 +1,50 @@
 # Real replay training-chain demo
 
-This note separates the earlier project's formal model from the new ElixirEcho
-single-replay debug run. The debug run is a pipeline smoke, not a model-quality
-result.
+This note separates the earlier project's formal model, the earlier local
+single-replay debug run, and the later isolated G1/G3/G4 acceptance. G2
+independent Native capture remains BLOCKED. The G3 run proves a bounded
+single-episode training path, not model quality or large-scale training.
 
 ## Data flow
 
 ```mermaid
 flowchart LR
-  Replay[Fixed IL_Replay record] --> Native[FirstLight Native and BattleEnv]
-  Native --> Capture[ElixirEcho actor-fair capture]
-  Capture --> Trajectory[Isolated Trajectory train split]
-  Trajectory --> Reader[TrainingTrajectoryReader]
+  Replay[User-supplied IL_Replay and Native] --> Capture[ElixirEcho capture CLI<br/>G2: BLOCKED in isolated preflight]
+  EarlierCapture[Earlier locally configured capture] --> Archive[Validated fixed-replay Trajectory<br/>read-only G3/G4 input]
+  Archive --> Reader[TrainingTrajectoryReader]
   Reader --> Temporal[Existing public History and Tracker]
   Temporal --> Tensorizer[RICH V4 Tensorizer]
   Tensorizer --> Model[FirstLight V4 recurrent policy and action heads]
-  Model --> IL[IL loss and AdamW, two 32-step TBPTT updates]
-  IL --> Checkpoint[Separate debug checkpoint]
-  Checkpoint --> Reload[Fresh V4 instance reload and forward]
+  Model --> IL[FirstLight IL loss and AdamW<br/>G3: one episode, 44 updates]
+  IL --> Checkpoint[Separate acceptance checkpoint]
+  Checkpoint --> Reload[Fresh process restores model, AdamW, progress]
+  Reload --> Forward[Finite RICH forward<br/>G4]
 ```
 
 The fixed source was replay `86582cdb2f0f4e8c94e9d9540d75e4cb`. ElixirEcho
 used the existing FirstLight checkout; its `contracts.py` and `battle_env.py`
 hashes matched the prior episode reference. The old-project cache was read-only
 and used only for semantic comparison, not as this run's training input.
+
+## G1 runtime smoke: PASS
+
+The isolated environment ran the single approved integration test
+`test_full_profile_sequence_runs_firstlight_v4_il_and_checkpoint_roundtrip`.
+It passed in 14.63 seconds with PyTorch `2.5.1+cu124` and the raw public
+FirstLight checkout on an RTX 4070 Laptop. This is a bounded V4/IL/checkpoint
+runtime smoke; it does not test Native capture.
+
+## G2 independent Native capture: BLOCKED
+
+The isolated `capture` preflight was run without `--run`. It found the raw
+Provider path and replay identity configuration, but no `replays/*.parquet`
+dataset in the non-lab paths searched during this preflight. The fixed replay
+exists only as the read-only archived Trajectory used for G3/G4. The Native
+control endpoint was not listening. MuMu/ADB processes were present, but no
+ADB query, game connection, or service startup was performed. The preflight
+returned `ready=false`, created no Trajectory, and does not establish
+independent end-to-end capture. The current capture CLI must not be described
+as verified in a clean public environment.
 
 ## Earlier project's formal result
 
@@ -37,7 +58,7 @@ sequences, and 67,894 decision frames, with teacher-forced total IL loss
 input contract; ElixirEcho did not retrain or claim ownership of those weights.
 See the [model card](model-card.md) for the full breakdown and limitations.
 
-## ElixirEcho single-replay run
+## Earlier local capture and two-step debug smoke
 
 Capture completed with `terminated` outcome and assigned only to the isolated
 debug `train` split:
@@ -86,6 +107,34 @@ pre/post-reload differences were `0` and `2.38e-7` respectively.
 The trajectory reader verification passed for one terminated episode and
 1,406 records. The existing 21 focused capture/CLI tests had passed before
 this real run; they were not rerun because no code changed during the run.
+
+## G3/G4 isolated single-episode training acceptance
+
+G3 used the archived Trajectory read-only as the training input. The replay
+was `86582cdb2f0f4e8c94e9d9540d75e4cb`, terminated, assigned to `train`, and
+matched dataset fingerprint
+`f95d10b96731134a93597e79548c202902886288fe53984182363ba6047f499b`. The
+run used the raw public Provider, CUDA, and one terminated episode; it did not
+resume from the historical formal checkpoint.
+
+| Check | Result |
+| --- | ---: |
+| Decision ticks / actor records | 703 / 1,406 (703 per actor) |
+| TBPTT length / optimizer updates | 32 / 44 |
+| Elapsed training time | 6m 23s |
+| Labels | 1,344 WAIT; 57 single play-card; 4 ability and 1 multi-action retained but unsupervised |
+| Non-finite guards | No loss/gradient guard fired; per-step numeric loss, gradient norm, and parameter-delta reports were not emitted |
+| Checkpoint | `episode-000001-step-00000044`; one completed episode, optimizer step 44 |
+| Weights SHA-256 | `925055abb124804dc901f200739bafcb41c42f1b98e68f53233c3a691ea41d80` |
+
+G4 used a separate Python process and fresh V4 instance. It restored model
+weights, AdamW state, and progress metadata from that G3 checkpoint; all 373
+restored optimizer parameter states had step 44. A RICH forward on actor 0,
+tick 90 produced finite gate logits `[1, 2]` and candidate logits `[1, 6]`.
+The training run did not preserve pre-save logits, so save/load logits parity
+was **not measured**. These results validate one complete episode's engineering
+path only; they do not constitute formal multi-replay training or a quality
+evaluation.
 
 ## Historical formal checkpoint: fixed-replay prediction sample
 
@@ -157,13 +206,14 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
 
 ## Limits
 
-- This proves one fixed replay can flow through real Native capture, the
-  existing RICH/Tensorizer and V4 trainer, two TBPTT updates, and checkpoint
-  reload. It does not measure playing strength.
+- Earlier local capture evidence and the isolated G3/G4 training acceptance
+  are separate results. G3 used the already archived trajectory; it did not
+  revalidate Native replay capture in the isolated environment. It does not
+  measure playing strength.
 - Only actor 0's 64-decision prefix was optimized. The debug checkpoint is
   intentionally separate and is not a formal or resumable training result.
-- No batch capture, complete ElixirEcho dataset-training run, full model
-  evaluation, or win-rate test was performed. The two updates are a debug smoke
-  using upstream FirstLight V4 components. Ability and multi-action labels remain
-  outside this first-pass loss.
+- G2 independent Native recapture is blocked; no batch capture, multi-replay
+  formal training, full model evaluation, or win-rate test was performed. G3
+  covered one episode and 44 updates using upstream FirstLight V4 components.
+  Ability and multi-action labels remain outside this first-pass loss.
 - The historical formal checkpoint, sealed data, and legacy research checkout were not modified.

@@ -19,9 +19,30 @@ not presented as a production player.
 
 ## Evidence and limitations
 
-The tiny-overfit and one-episode checks establish that the computational
-chain reaches loss and backpropagation. The old-project compatibility bridge
-uses a selected sealed episode, Layer 2 shard, and formal checkpoint.
+The earlier tiny-overfit and two-update debug checks established that the
+computational chain reaches loss and backpropagation. The later G1/G3/G4
+acceptance results below add an isolated runtime smoke, a single complete
+episode training run, and a fresh-process restore. They do not establish model
+quality. The old-project compatibility bridge uses a selected sealed episode,
+Layer 2 shard, and formal checkpoint.
+
+### ElixirEcho pipeline acceptance (not a quality evaluation)
+
+G1 passed the specified V4/IL/checkpoint integration smoke in the isolated
+environment using PyTorch `2.5.1+cu124` and the raw public FirstLight Provider
+on an RTX 4070 Laptop (1 test, 14.63 seconds). G3 then trained on one read-only
+archived, terminated replay: 703 decision ticks, 1,406 actor records, 44
+optimizer updates, and 6m 23s elapsed. Its separate checkpoint weights have
+SHA-256
+`925055abb124804dc901f200739bafcb41c42f1b98e68f53233c3a691ea41d80`.
+
+G4 restored the model, AdamW state, and training progress in a fresh process
+and ran a finite RICH forward. Pre-save logits were not retained, so logits
+parity was not measured. G2 independent Native recapture remains BLOCKED
+because the original Parquet input and a listening Native service were
+unavailable during preflight. This one-episode pipeline acceptance is not
+formal large-scale training, a held-out result, or evidence of playing
+strength. See [Demo and Results](demo-results.md) for the detailed evidence.
 
 ### Historical checkpoint: sealed test split
 

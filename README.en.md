@@ -16,7 +16,7 @@ It is not an official Clash Royale project or a production-ready online bot. The
 - Stores complete trajectories with atomic writes, per-record hashes, and an episode aggregate hash; the training reader does not expose episode decks or provider diagnostics.
 - Uses causal `History` and a deterministic `PublicStateTracker` for public events, revealed opponent cards, and previous actions; unknown facts remain unknown.
 - Provides `MIN` / `RICH` observation profiles and a FirstLight V4 adapter. Historical formal checkpoints use their compatible legacy input mode.
-- Reuses the existing FirstLight V4 components for a real single-match capture, RICH input compilation, TBPTT debug updates, and an isolated checkpoint reload check.
+- Reuses existing FirstLight V4 components for single-match capture, RICH input compilation, and training integration. G1 runtime smoke, G3 single-episode training, and G4 fresh-process restore passed; independent G2 Native recapture remains blocked by external data and Native readiness.
 
 ## Data-flow architecture
 
@@ -37,7 +37,9 @@ FirstLight supplies the Native runner, BattleEnv, V4 encoders, recurrent policy,
 ## Experimental results
 
 - **Formal checkpoint from the earlier research project:** its historical sealed-test evaluation covered 38 matches, 76 actor sequences, and 67,894 decision frames, with teacher-forced total IL loss 6.0717. This is an earlier-project result under its fingerprinted input contract, not an ElixirEcho retraining result or a win rate.
-- **ElixirEcho real pipeline:** fixed replay `86582cdb2f0f4e8c94e9d9540d75e4cb` was reconstructed from tick 90 through tick 3600: 703 decision ticks and 1,406 actor records. Key semantics matched the old run and all 1,406 label-leakage checks passed. A randomly initialized debug model completed two 32-step TBPTT updates; its isolated checkpoint was saved, reloaded, and compared on a forward pass.
+- **G1 runtime acceptance:** the specified V4/IL/checkpoint smoke test passed in the isolated environment with the public raw FirstLight Provider and PyTorch 2.5.1+cu124 on an RTX 4070 Laptop (1 test, 14.63 seconds). This verifies a bounded runtime training/checkpoint path, not Native capture.
+- **G3/G4 single-episode training acceptance:** using the read-only archived fixed replay `86582cdb2f0f4e8c94e9d9540d75e4cb` (terminated, train split; dataset fingerprint `f95d10b96731134a93597e79548c202902886288fe53984182363ba6047f499b`), ElixirEcho trained on 1,406 actor records with RICH input for 44 optimizer updates in 6m 23s. A separate checkpoint was saved, then a fresh process restored the model, AdamW, and training progress and ran a finite forward pass on the same RICH input. Weight SHA-256: `925055abb124804dc901f200739bafcb41c42f1b98e68f53233c3a691ea41d80`. This is a complete single-match engineering run, not formal large-scale training or a model-quality evaluation.
+- **G2 independent Native capture: BLOCKED.** The isolated preflight did not locate original IL_Replay Parquet in the non-lab paths searched, and the Native control port was not listening. No `capture --run` was executed. Earlier single-match capture evidence came from a previously configured local environment and does not establish end-to-end capture in a clean public setup.
 - **Historical checkpoint prediction demo:** the checkpoint's `legacy_checkpoint` input mode was used for ordered inference over all 1,406 records. Twenty comparisons were emitted at 10 ticks × 2 actors. Every sampled model prediction was WAIT; 12 of 16 comparable WAIT/single-card labels matched, while four single-card labels were predicted as WAIT. Four ability/multi-action labels are outside this checkpoint's supported action-head comparison. This is a fixed-sample demonstration, not a win-rate or held-out metric.
 
 The fixed replay appears in the earlier Pilot20 `train` split. Its membership in the historical formal checkpoint's train/validation/test splits could not be confirmed by matching the same replay identity, so this comparison is **not described as held out**. The historical checkpoint and sealed data are not included in this repository.
@@ -46,9 +48,7 @@ See [Demo and Results](docs/demo-results.md) and the [model card](docs/model-car
 
 ## Demo
 
-![Semantic view generated from a saved real trajectory: not game footage and not autonomous model play](docs/assets/trajectory-replay-86582-semantic.gif)
-
-This GIF draws the arena, towers, entities, current player information, and expert labels at 10 ticks from the saved real Trajectory above. It is a **data-derived semantic trajectory view**, not a game recording and not a model playing autonomously in the simulator. The sampled predictions from the historical checkpoint and reproduction command are documented in [Demo and Results](docs/demo-results.md).
+This repository does not distribute a GIF derived from the real replay. See [Demo and Results](docs/demo-results.md) for verified prediction records, run metrics, and reproduction details.
 
 ## Quick start
 
@@ -89,7 +89,7 @@ uv run elixir-echo capture `
 
 The preflight should report `ready: true` and `not_checked` for Native reachability. Add `--run` to connect to Native and process the requested replay. A missing identity or upstream reconstruction failure does not trigger a substitute replay. A complete match captures both actors from tick 90 every five ticks until a trusted terminated/truncated outcome and verifies the episode before atomic commit. The output must be outside the input dataset and FirstLight checkout.
 
-One fixed replay has been validated. This does not establish that arbitrary replays will reconstruct successfully; batch capture is unverified. With `--debug-train`, keep output under an isolated `runs/real-replay-chain/<run-id>` directory. Replay data, game assets, and Native setup are user-supplied and not distributed.
+One fixed replay was previously reconstructed in a locally configured environment; this does not establish that arbitrary replays will reconstruct successfully. The clean-environment G2 preflight on 2026-10-25 was BLOCKED because the original Parquet and Native service were unavailable, and `capture --run` was not tested there. The capture path is therefore not independently accepted using only public code, an external Provider, and user-supplied resources. Batch capture is also unverified. With `--debug-train`, keep output under an isolated `runs/real-replay-chain/<run-id>` directory. Replay data, game assets, and Native setup are user-supplied and not distributed.
 
 ## Capped training entry point
 
@@ -108,9 +108,9 @@ Add `--run` after reviewing the plan. To resume from a saved checkpoint, pass `-
 ## Dependencies, provenance, and limitations
 
 - **Core:** Python 3.12+; `uv` installs development dependencies. The optional `firstlight-capture` extra installs a Parquet reader; `firstlight-cache` installs safetensors and zstandard. Install the PyTorch build required by the local FirstLight CPU/CUDA setup separately.
-- **FirstLight is external:** [FirstLight CR](https://github.com/Jaasssooooonnnn/FirstLight_CR). Its source, weights, and game resources are not vendored here; check upstream code and asset terms before use or redistribution.
+- **FirstLight is external:** [FirstLight CR](https://github.com/Jaasssoooonnnnn/FirstLight_CR). Its source, weights, and game resources are not vendored here; check upstream code and asset terms before use or redistribution.
 - The historical formal checkpoint, sealed data, source IL_Replay data, and Native game resources are not included. The real-replay prediction script requires a compatible local checkpoint, trajectory, and FirstLight checkout.
-- Verified capabilities are the fixed-replay pipeline, historical-checkpoint loading compatibility, and a small teacher-forced per-frame prediction display. Batch production, a complete independent training run, autonomous simulator play, and win rate are unverified. The model predicted only WAIT at the sampled points; successful prediction output does not mean the policy is useful.
-- This repository does not yet declare a distribution license. It is not an official game tool and makes no production deployment or online-safety claim.
+- Verified capabilities include the G1 runtime smoke, G3 training on one archived complete match for 44 updates, G4 fresh-process restore, historical-checkpoint loading compatibility, and a small teacher-forced prediction display. Independent G2 Native recapture, batch production, multi-replay formal training, autonomous simulator play, and win rate are unverified. G3 is an engineering acceptance, not evidence of model quality; the historical checkpoint predicted only WAIT at the sampled points.
+- ElixirEcho-authored implementation code under `src/`, `tests/`, and `tools/` is licensed under Apache-2.0; see the root [LICENSE](LICENSE). This license covers only code the project owner is entitled to license. It does not grant rights to FirstLight, IL_Replay or replay-derived materials, model weights, or game/Native resources; see [Third-party Notices](THIRD_PARTY_NOTICES.md). This is not an official game tool and makes no production deployment or online-safety claim.
 
 See [CONTEXT.md](CONTEXT.md) for domain vocabulary and ownership boundaries, [architecture](docs/architecture.md) for system structure, and [`docs/provenance`](docs/provenance/) for source and migration records.
