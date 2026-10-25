@@ -16,7 +16,7 @@
 - 通过原子写入、逐记录哈希和 episode aggregate hash 保存完整轨迹；训练 reader 不暴露 episode deck 或 provider diagnostics。
 - 用因果 `History` 与确定性 `PublicStateTracker` 管理公开事件、对手已暴露卡牌和 previous action；未知信息保持 unknown。
 - 提供 `MIN` / `RICH` observation profiles 和 FirstLight V4 适配层；历史正式 checkpoint 使用其兼容输入模式。
-- 复用既有 FirstLight V4 组件完成真实单局采集、RICH 输入编译与训练接线；G1 运行时 smoke、G3 单局训练及 G4 新进程恢复已通过。独立环境 G2 Native 再采集仍受外部数据和 Native 环境阻断。
+- 复用既有 FirstLight V4 组件完成真实单局采集、RICH 输入编译与训练接线；G1 运行时 smoke、G2 固定回放采集、G3 单局训练及 G4 新进程恢复均已通过。G2 使用本机已有的 Native 部署资源，不代表全新机器开箱安装或批量采集已验证。
 
 ## 数据流架构
 
@@ -39,7 +39,7 @@ FirstLight 提供 Native runner、BattleEnv、V4 编码器、循环策略、动�
 - **旧研究项目的正式 checkpoint**：历史封存测试覆盖 38 场、76 个 actor 序列、67,894 个决策帧；teacher-forced 总 IL loss 为 6.0717。这是旧项目在其指纹化输入契约上的评估，不是圣水回响重新训练的结果，也不是胜率。
 - **G1 运行时验收**：在隔离环境中使用公开 FirstLight 原始 Provider 和 PyTorch 2.5.1+cu124，RTX 4070 Laptop 上指定的 V4/IL/checkpoint smoke 测试通过（1 项，14.63 秒）。这验证了受控的运行时训练与 checkpoint 路径，不验证 Native 采集。
 - **G3/G4 单局训练验收**：使用只读归档的固定 replay `86582cdb2f0f4e8c94e9d9540d75e4cb`（terminated，train split，数据指纹 `f95d10b96731134a93597e79548c202902886288fe53984182363ba6047f499b`），完成 1,406 条 actor record 的 RICH 训练输入和 44 次 optimizer update，耗时 6 分 23 秒。隔离 checkpoint 保存后，在新进程中恢复模型、AdamW 与训练进度，并对同一 RICH 输入执行有限值 Forward。权重 SHA-256：`925055abb124804dc901f200739bafcb41c42f1b98e68f53233c3a691ea41d80`。这是一次完整单局工程训练验收，不是正式大规模训练或模型质量评估。
-- **G2 独立 Native 采集：BLOCKED**。隔离预检在本轮检查的实验室外路径中未找到原始 IL_Replay Parquet，Native 控制端口也未监听；没有运行 `capture --run`。既有单局采集证据来自此前已配置的本地环境，不能当作干净公开环境的端到端验收。
+- **G2 本机隔离 Native 采集：PASS（单场）**。在隔离 ElixirEcho checkout 中使用固定 replay `86582cdb2f0f4e8c94e9d9540d75e4cb`，重建至 `terminated`，得到 703 个连续 decision tick（90–3600，每 5 tick）和 1,406 条双 actor record。Trajectory 校验、逐 tick/actor 对齐及 1,406/1,406 标签泄漏断言通过。数据来自本机提供的原始 IL_Replay；FirstLight Provider 使用原始源码 checkout，Native 服务由本机已有部署环境启动。该结果不是全新机器开箱安装证明，也不证明任意 replay 或批量采集可靠。专家动作有 63 个：57 次出牌、6 次技能；1,344 条空动作记录按契约表示 WAIT，62 条非 WAIT 记录中有一个窗口包含两个动作。57/57 出牌标签符合对应 hand-slot mask。一个技能标签位于 tick 830、`execute_offset_ticks=+3`，该帧的技能 mask 为 false；未单独采样 tick 833 的执行瞬间，因此不声称全部技能动作在记录帧即时合法。详见 [Demo/Results](docs/demo-results.md)。
 - **旧正式 checkpoint 预测展示**：使用 checkpoint 的 `legacy_checkpoint` 输入兼容模式，对上述固定 replay 的 1,406 条记录顺序推理，在 10 个 tick × 2 个 actor 的 20 个采样点生成对照。样本中模型预测均为 WAIT；16 个 WAIT/单次出牌可比较标签中有 12 个一致，4 个单次出牌标签被预测为 WAIT；4 个技能/多动作标签不在该 checkpoint 的此动作头比较范围内。这只是固定样本展示，不是胜率或 held-out 指标。
 
 固定 replay 出现在旧 Pilot20 的 `train` split。旧正式 checkpoint 的历史 train/validation/test 成员关系未能通过同一 replay identity 完整确认，因此本项目**不把这次对照称为 held-out 评估**。历史正式 checkpoint 与本地封存数据均不包含在仓库中。
@@ -89,7 +89,7 @@ uv run elixir-echo capture `
 
 预检报告应显示 `ready: true`，并将 Native 可达性标为 `not_checked`。加上 `--run` 才会连接 Native 并处理指定 replay。identity 缺失或上游重建失败时不会替换成另一场。完整 episode 从 tick 90 起每 5 tick 同时采集两个 actor，直到可信的 terminated/truncated，并在原子提交前校验完整性。输出目录必须位于输入数据和 FirstLight checkout 之外。
 
-此前已在本机已配置环境中完成一场固定 replay 的 Native 重建；不能据此推断任意回放都能重建成功。2026-10-25 的独立环境 G2 预检因原始 Parquet 与 Native 服务未就绪而为 BLOCKED，尚未证明使用者只凭公开代码、外部 Provider 和自备资源即可完成采集。批量采集仍未验证。使用 `--debug-train` 时，输出必须位于隔离的 `runs/real-replay-chain/<run-id>` 目录中。回放、游戏资源和 Native 均由使用者自行准备，不随仓库分发。
+2026-10-25 已在隔离 ElixirEcho checkout 中完成一场固定 replay 的 G2 Native 采集。该次验收使用本机已存在的 FirstLight Native 部署资源；它不是全新机器仅凭公开源码即可启动 Native 的证明，也不能推断任意回放均可重建成功。批量采集仍未验证。使用 `--debug-train` 时，输出必须位于隔离的 `runs/real-replay-chain/<run-id>` 目录中。回放、游戏资源和 Native 均由使用者自行准备，不随仓库分发。
 
 ## 受限训练入口
 
@@ -110,7 +110,7 @@ uv run elixir-echo train-firstlight `
 - 核心：Python 3.12+；可用 `uv` 安装开发依赖。可选 `firstlight-capture` 安装 Parquet reader；`firstlight-cache` 安装 safetensors 与 zstandard。FirstLight 的 PyTorch/CUDA 环境需单独按本机配置准备。
 - FirstLight 是外部依赖：[FirstLight CR](https://github.com/Jaasssoooonnnnn/FirstLight_CR)。它的源码、权重和游戏资源没有 vendored 到本仓库；使用或再分发前应核实上游代码与资产许可。
 - 旧正式 checkpoint、封存数据、IL_Replay 原始数据和 Native 游戏资源未包含在仓库中。真实 replay 预测脚本需要本地提供兼容的 checkpoint、轨迹和 FirstLight checkout。
-- 已验证 G1 运行时 smoke、G3 一场归档完整对局的 44 次更新、G4 新进程恢复，以及历史 checkpoint 的加载兼容和少量 teacher-forced 逐帧预测。G2 独立 Native 再采集、批量生产、多回放正式训练、自动化游戏实战和模型胜率尚未验证。G3 是单局工程验收，不代表模型质量；固定预测样本中模型只输出 WAIT。
+- 已验证 G1 运行时 smoke、G2 一场本机隔离 Native 采集、G3 一场归档完整对局的 44 次更新、G4 新进程恢复，以及历史 checkpoint 的加载兼容和少量 teacher-forced 逐帧预测。全新机器 Native 安装、批量采集、多回放正式训练、自动化游戏实战和模型胜率尚未验证。G3 是单局工程验收，不代表模型质量；固定预测样本中模型只输出 WAIT。
 - ElixirEcho 自有实现代码（`src/`、`tests/`、`tools/`）采用 Apache-2.0，见根目录 [LICENSE](LICENSE)。许可仅覆盖项目所有者有权授权的代码，不涵盖 FirstLight、IL_Replay 或其衍生回放素材、模型权重、游戏与 Native 资源；详见 [第三方声明](THIRD_PARTY_NOTICES.md)。项目不是官方游戏工具，也不承诺线上部署安全性。
 
 概念和责任边界见 [CONTEXT.md](CONTEXT.md)，架构说明见[架构文档](docs/architecture.md)，来源与迁移记录见 [`docs/provenance`](docs/provenance/)。

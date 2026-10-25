@@ -27,19 +27,23 @@ flowchart LR
 ```
 
 An earlier locally configured environment completed one real Native
-reconstruction and a two-update debug run. G1 runtime smoke and G3/G4
-single-episode training/reload acceptance have since passed in the isolated
-ElixirEcho environment. G3 used an already archived, read-only Trajectory;
-the separate G2 clean-environment Native recapture preflight is BLOCKED. These
-results do not establish arbitrary-replay or batch reliability. The V4
-backbone, recurrent model, and core imitation-loss implementation are external
-FirstLight components; ElixirEcho has not rebuilt them.
+reconstruction and a two-update debug run. G1 runtime smoke, G2 single-replay
+Native capture, and G3/G4 single-episode training/reload acceptance have now
+passed in the isolated ElixirEcho environment. G3 used an already archived,
+read-only Trajectory. For G2, the Provider was the original-source checkout at
+`D:\FirstLight_CR-main`; the Native service was started through the existing
+deployment at `D:\Downloads\FirstLight_CR-main`, which supplied its built
+runtime resources and local compatibility. This hybrid local setup is not a
+fresh-machine installation test and does not establish arbitrary-replay or
+batch reliability. The V4 backbone, recurrent model, and core imitation-loss
+implementation are external FirstLight components; ElixirEcho has not rebuilt
+them.
 
 ## Source-to-destination map
 
 | Responsibility | Earlier implementation or external source | ElixirEcho implementation | Migration and verification boundary |
 | --- | --- | --- | --- |
-| Replay selection and Native calibration | Earlier `semantic_frame.firstlight_replay_smoke` and `semantic_frame.firstlight_full_episode`; external FirstLight `NativeClashEnv` and `BattleEnvV1` | `integrations.firstlight.capture` | The source preflight rule and preparation, calibration, reset, and expert-command scheduling order were ported and adapted to a one-replay CLI. Native and BattleEnv are imported from the configured external checkout. An earlier locally configured run reconstructed fixed replay `86582cdb2f0f4e8c94e9d9540d75e4cb` from tick 90 through trusted termination: 703 decision ticks, 1,406 actor records, key semantic parity passed, and all 1,406 label-leakage assertions passed. The later isolated G2 preflight returned `ready=false`: no original Parquet was located in the non-lab paths searched and Native port 26789 was not listening; no `capture --run` was attempted. Independent clean-environment capture, arbitrary replay acceptance, and batch capture remain unverified. |
+| Replay selection and Native calibration | Earlier `semantic_frame.firstlight_replay_smoke` and `semantic_frame.firstlight_full_episode`; external FirstLight `NativeClashEnv` and `BattleEnvV1` | `integrations.firstlight.capture` | The source preflight rule and preparation, calibration, reset, and expert-command scheduling order were ported and adapted to a one-replay CLI. Native and BattleEnv are imported from the configured external checkout. G2 captured fixed replay `86582cdb2f0f4e8c94e9d9540d75e4cb` in the isolated ElixirEcho checkout through trusted termination: 703 five-tick decision steps, 1,406 records, and 1,406/1,406 label-leakage assertions passed. The original-source Provider was `D:\FirstLight_CR-main`; Native was launched through the existing deployed environment `D:\Downloads\FirstLight_CR-main`. This does not prove raw-source Native deployment on a clean machine, arbitrary replay acceptance, or batch reliability. A prior read-only preflight had been blocked before the raw Parquet and Native environment were made available. |
 | Paired actor decision timeline | Earlier `firstlight_full_episode.group_timed_expert_actions` and `capture_decision_timeline` | `integrations.firstlight.replay` | Five-tick, two-actor timing and the label-leakage boundary were migrated into the new trajectory contract. No separate game engine was built. |
 | Actor-fair semantic input | Earlier `semantic_frame.contracts`, `firstlight_adapter`, and `profiles` | `domain.observation`, `integrations.firstlight.observation`, and `profiles.observation` | Field rules and MIN/RICH selection were migrated with contract and naming adaptations. Semantic parity tests cover selected legacy assets; they do not prove equivalence for every game mechanism. |
 | Tensorizer and temporal V4 input | Earlier `training.tensorizer_v1` and `training.temporal_v4_input` | `integrations.firstlight.tensorizer` | **Substantial input assembly was rewritten** for ElixirEcho contracts. `legacy_checkpoint` preserves the historical input mode; representative tensor and checkpoint compatibility tests compare against the earlier implementation and sealed cache. The richer mode is a separate input contract. |
@@ -65,16 +69,21 @@ break compatibility.
 | --- | --- | --- |
 | Unit and selected legacy parity checks | Core contracts and selected old tensors, labels, and model outputs have matched in the configured test cases. | Universal equivalence across all mechanisms or machines. |
 | Earlier formal checkpoint and sealed-test loss | The existing weights load under the old fingerprinted input contract, and the read-only evaluation path completed. | Independently trained ElixirEcho weights, competitive strength, or a win rate. |
-| Earlier local capture and isolated G1/G3/G4 | Earlier single replay reached trusted termination with 703 decision ticks and 1,406 records; semantic parity and 1,406 label-leakage checks passed. G1 runtime smoke passed. G3 trained on the archived replay for 44 optimizer updates in 6m23s and saved the checkpoint identified above; G4 restored model, AdamW and progress in a fresh process and ran a finite RICH forward. | Independent G2 Native recapture, arbitrary replay coverage, batch capture, formal multi-replay training, held-out quality, or gameplay strength. |
+| Isolated G1/G2/G3/G4 | G1 runtime smoke passed. G2 captured one fixed replay to trusted termination with 703 decision ticks and 1,406 actor records; trajectory verification and 1,406 label-leakage assertions passed. G3 trained on the archived replay for 44 optimizer updates in 6m23s and saved the checkpoint identified above; G4 restored model, AdamW and progress in a fresh process and ran a finite RICH forward. | Fresh-machine Native setup from raw source alone, arbitrary replay coverage, batch capture, formal multi-replay training, held-out quality, or gameplay strength. |
 | One-batch decision diagnostics | A bounded offline check of the existing checkpoint. | Full test-split action-quality conclusions. |
-| Capture tests, earlier local replay, and G2 preflight | Source selection and simulated Native call ordering; one earlier locally configured real replay; later isolated preflight correctly reported `ready=false` without running capture. | Independent clean-environment replay capture, arbitrary replay reconstruction, or batch reliability. |
+| Capture tests and isolated G2 run | Source selection and simulated Native call ordering; one fixed real replay captured on this host using the original-source Provider and a separately deployed Native runtime. | Clean-machine Native installation, arbitrary replay reconstruction, or batch reliability. |
 | Release audit | Prospective Git file hygiene at the time it was run. | A commit, push, remote visibility check, or review of future changes. |
 
-For this public Portfolio repository, G1 runtime smoke and G3/G4 single-episode
-training/checkpoint restore are verified. G2 independent Native capture is
-BLOCKED. Multi-replay formal training, arbitrary/batch capture, full-split
-decision analysis, pre-save/post-load logits parity, and autonomous gameplay
-remain unverified and must be described that way.
+For this public Portfolio repository, G1 runtime smoke, G2 one-replay Native
+capture on the existing host setup, and G3/G4 single-episode training/checkpoint
+restore are verified. The G2 run produced 63 actions in 62 non-WAIT records
+because actor 0's tick-3505 window contains two ability actions; 1,344 empty
+action records represent WAIT. One delayed ability at tick 830 has offset +3
+while its observation-time mask is false; the exact tick-833 execution mask was
+not sampled. Multi-replay formal training, clean-machine Native installation,
+arbitrary/batch capture, full-split decision analysis, pre-save/post-load logits
+parity, and autonomous gameplay remain unverified and must be described that
+way.
 
 `source-inventory.json` is a historical inventory of the earlier local
 research workspace. It excludes generated caches and weights. It is not an

@@ -1,15 +1,17 @@
 # Real replay training-chain demo
 
 This note separates the earlier project's formal model, the earlier local
-single-replay debug run, and the later isolated G1/G3/G4 acceptance. G2
-independent Native capture remains BLOCKED. The G3 run proves a bounded
-single-episode training path, not model quality or large-scale training.
+single-replay debug run, and the isolated G1–G4 engineering acceptance. G2
+covers one fixed replay on this host using an existing Native deployment; it
+does not establish clean-machine Native installation, batch capture, or model
+quality. G3 proves a bounded single-episode training path, not large-scale
+training.
 
 ## Data flow
 
 ```mermaid
 flowchart LR
-  Replay[User-supplied IL_Replay and Native] --> Capture[ElixirEcho capture CLI<br/>G2: BLOCKED in isolated preflight]
+  Replay[User-supplied IL_Replay and Native] --> Capture[ElixirEcho capture CLI<br/>G2: one fixed replay PASS on this host]
   EarlierCapture[Earlier locally configured capture] --> Archive[Validated fixed-replay Trajectory<br/>read-only G3/G4 input]
   Archive --> Reader[TrainingTrajectoryReader]
   Reader --> Temporal[Existing public History and Tracker]
@@ -34,17 +36,41 @@ It passed in 14.63 seconds with PyTorch `2.5.1+cu124` and the raw public
 FirstLight checkout on an RTX 4070 Laptop. This is a bounded V4/IL/checkpoint
 runtime smoke; it does not test Native capture.
 
-## G2 independent Native capture: BLOCKED
+## G2 isolated Native capture: PASS for one fixed replay
 
-The isolated `capture` preflight was run without `--run`. It found the raw
-Provider path and replay identity configuration, but no `replays/*.parquet`
-dataset in the non-lab paths searched during this preflight. The fixed replay
-exists only as the read-only archived Trajectory used for G3/G4. The Native
-control endpoint was not listening. MuMu/ADB processes were present, but no
-ADB query, game connection, or service startup was performed. The preflight
-returned `ready=false`, created no Trajectory, and does not establish
-independent end-to-end capture. The current capture CLI must not be described
-as verified in a clean public environment.
+The isolated ElixirEcho checkout captured replay
+`86582cdb2f0f4e8c94e9d9540d75e4cb` from user-provided IL_Replay data. The run
+reached trusted `terminated` at tick 3600 and produced 703 decision ticks from
+tick 90 at five-tick intervals, with both actors at every tick: 1,406 records.
+The existing trajectory verifier passed; record order, episode/tick/actor
+identity, ActionMask identity and shape, and 1,406/1,406 label-leakage
+assertions passed. The Trajectory aggregate hash is
+`f5a46c23de779b1f41f7a2c02116bca0154cfd931b75c957a1d09fc978e0cfb4`; the
+`records.jsonl` SHA-256 is
+`4450B7D1CB0DB026A1EB62285CA364AF74932F80D64B37A3E235A0EEA90B84B7`.
+
+The action counts are consistent: there are 1,344 empty-action records, which
+the `ExpertAction` contract interprets as WAIT, and 62 non-WAIT records. One
+non-WAIT window (actor 0, tick 3505) contains two ability actions, so the total
+is 63 actions: 57 card plays and 6 abilities. All 57 card labels matched the
+paired hand-slot mask.
+
+Five ability labels were allowed by the ActionMask at their recorded frame.
+One ability label is recorded at actor 0, tick 830, with
+`execute_offset_ticks=+3`, while the mask at tick 830 says ability is not
+currently available. The action belongs to the delayed window and occurred at
+tick 833; that exact execution tick was not sampled separately. Therefore this
+run does not claim that all ability actions were legal at the observation
+instant or that the ActionMask was independently checked at every delayed
+execution instant.
+
+The capture used the original-source FirstLight checkout as its Provider, but
+the Native service was launched with the existing local deployed FirstLight
+environment and its built runtime resources. This validates one replay through
+the isolated ElixirEcho capture path on this host. It is not a fresh-machine
+installation test, does not establish Native deployment from the raw source
+checkout alone, and does not establish arbitrary-replay or batch reliability.
+The capture did not train a model.
 
 ## Earlier project's formal result
 
@@ -212,8 +238,10 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
   measure playing strength.
 - Only actor 0's 64-decision prefix was optimized. The debug checkpoint is
   intentionally separate and is not a formal or resumable training result.
-- G2 independent Native recapture is blocked; no batch capture, multi-replay
-  formal training, full model evaluation, or win-rate test was performed. G3
-  covered one episode and 44 updates using upstream FirstLight V4 components.
-  Ability and multi-action labels remain outside this first-pass loss.
+- G2 passed for one fixed replay on this host using an existing Native
+  deployment; clean-machine Native installation, batch capture, arbitrary
+  replay reliability, multi-replay formal training, full model evaluation,
+  and win-rate testing remain unverified. G3 covered one episode and 44 updates
+  using upstream FirstLight V4 components. Ability and multi-action labels
+  remain outside this first-pass loss.
 - The historical formal checkpoint, sealed data, and legacy research checkout were not modified.

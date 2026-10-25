@@ -20,11 +20,11 @@ not presented as a production player.
 ## Evidence and limitations
 
 The earlier tiny-overfit and two-update debug checks established that the
-computational chain reaches loss and backpropagation. The later G1/G3/G4
-acceptance results below add an isolated runtime smoke, a single complete
-episode training run, and a fresh-process restore. They do not establish model
-quality. The old-project compatibility bridge uses a selected sealed episode,
-Layer 2 shard, and formal checkpoint.
+computational chain reaches loss and backpropagation. The later G1–G4
+acceptance results below add an isolated runtime smoke, one fixed-replay
+capture, a single complete episode training run, and a fresh-process restore.
+They do not establish model quality. The old-project compatibility bridge uses
+a selected sealed episode, Layer 2 shard, and formal checkpoint.
 
 ### ElixirEcho pipeline acceptance (not a quality evaluation)
 
@@ -38,11 +38,13 @@ SHA-256
 
 G4 restored the model, AdamW state, and training progress in a fresh process
 and ran a finite RICH forward. Pre-save logits were not retained, so logits
-parity was not measured. G2 independent Native recapture remains BLOCKED
-because the original Parquet input and a listening Native service were
-unavailable during preflight. This one-episode pipeline acceptance is not
-formal large-scale training, a held-out result, or evidence of playing
-strength. See [Demo and Results](demo-results.md) for the detailed evidence.
+parity was not measured. G2 captured one fixed replay in the isolated ElixirEcho
+checkout on the existing host, using the original-source FirstLight Provider
+and a Native service launched from an existing deployment. This does not prove
+clean-machine Native setup, arbitrary-replay or batch capture. One delayed
+ability label had an observation-time mask limitation; see [Demo and
+Results](demo-results.md). These pipeline acceptances are not formal
+large-scale training, a held-out result, or evidence of playing strength.
 
 ### Historical checkpoint: sealed test split
 
