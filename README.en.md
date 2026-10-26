@@ -7,6 +7,8 @@ Every Clash Royale decision depends on the elixir, hand, battlefield, and oppone
 ElixirEcho turns full replays into auditable, two-player decision sequences and connects those sequences to recurrent imitation learning with FirstLight V4. This repository implements replay integration, semantic state and action contracts, trajectory storage, causal temporal state, V4 input adaptation, and training orchestration. The Native battle environment, V4 network, and core IL loss come from the external FirstLight project.
 
 ![Animated semantic replay montage](docs/assets/trajectory-montage-3x3.gif)
+This montage shows the model making decisions in real matches. Trained through imitation learning on **semantic trajectories reconstructed from 500 matches**, the model autonomously makes card-play decisions during actual gameplay.
+
 
 ## What it does
 
