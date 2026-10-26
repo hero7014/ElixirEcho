@@ -1,4 +1,4 @@
-# ElixirEcho · 圣水回响
+# ElixirEcho
 
 [简体中文](README.md) · [English](README.en.md)
 
