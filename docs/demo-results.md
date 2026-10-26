@@ -1,5 +1,9 @@
 # Real replay training-chain demo
 
+The README's 3×3 GIF (`docs/assets/trajectory-montage-3x3.gif`) is a semantic
+state visualization, not game footage. Its action captions are expert labels,
+not model predictions or executed model actions.
+
 This note separates the earlier project's formal model, the earlier local
 single-replay debug run, and the isolated G1–G4 engineering acceptance. G2
 covers one fixed replay on this host using an existing Native deployment; it
@@ -236,8 +240,9 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
   are separate results. G3 used the already archived trajectory; it did not
   revalidate Native replay capture in the isolated environment. It does not
   measure playing strength.
-- Only actor 0's 64-decision prefix was optimized. The debug checkpoint is
-  intentionally separate and is not a formal or resumable training result.
+- The earlier two-update debug smoke optimized only actor 0's 64-decision
+  prefix. Its checkpoint is separate and not resumable. G3 later trained on the
+  complete archived episode and produced a different checkpoint.
 - G2 passed for one fixed replay on this host using an existing Native
   deployment; clean-machine Native installation, batch capture, arbitrary
   replay reliability, multi-replay formal training, full model evaluation,

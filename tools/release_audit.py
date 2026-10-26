@@ -10,11 +10,12 @@ from typing import Any
 
 
 _BINARY_SUFFIXES = frozenset({
-    ".apk", ".bin", ".ckpt", ".dll", ".exe", ".h5", ".onnx",
+    ".apk", ".bin", ".ckpt", ".dll", ".exe", ".gif", ".h5", ".onnx",
     ".parquet", ".pt", ".pth", ".safetensors", ".so", ".zip",
 })
 _PRIVATE_PARTS = frozenset({"artifacts", "checkpoints", "data", "models", "runs", ".venv", "__pycache__"})
 _MAX_FILE_BYTES = 2_000_000
+_APPROVED_DEMO_ASSETS = {"docs/assets/trajectory-montage-3x3.gif": 4_000_000}
 
 
 def prospective_files(root: Path) -> tuple[Path, ...]:
@@ -46,9 +47,11 @@ def audit_repository(root: Path) -> dict[str, Any]:
             continue
         if any(part.casefold() in _PRIVATE_PARTS for part in relative.parts[:-1]):
             findings.append({"path": name, "reason": "private_artifact_directory"})
-        if file.suffix.casefold() in _BINARY_SUFFIXES:
+        approved_demo_asset = name in _APPROVED_DEMO_ASSETS
+        if file.suffix.casefold() in _BINARY_SUFFIXES and not approved_demo_asset:
             findings.append({"path": name, "reason": "private_or_binary_artifact"})
-        if file.stat().st_size > _MAX_FILE_BYTES:
+        size_limit = _APPROVED_DEMO_ASSETS.get(name, _MAX_FILE_BYTES)
+        if file.stat().st_size > size_limit:
             findings.append({"path": name, "reason": "file_exceeds_public_source_limit"})
     return {
         "schema": "elixir_echo.release_audit@1",

@@ -49,9 +49,10 @@ Provider or grant rights to the IL_Replay dataset, replay-derived materials,
 historical checkpoints or model weights, game assets, or Native resources.
 The root code license does not grant blanket rights to other repository
 materials unless they carry a separate license notice.
-No replay-derived visualization is distributed in this repository. Replay-derived
-materials and their underlying data are excluded from the code license; this
-repository does not claim redistribution rights to them.
+The README includes `docs/assets/trajectory-montage-3x3.gif`, a semantic
+visualization rather than game footage. It does not include a source replay
+payload. The GIF is a display asset, not code covered by the root Apache-2.0
+license.
 
 ## Dataset and game assets
 

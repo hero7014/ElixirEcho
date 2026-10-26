@@ -1,116 +1,99 @@
-# ElixirEcho | 圣水回响
+# ElixirEcho · 圣水回响
 
 [简体中文](README.md) · [English](README.en.md)
 
-*Learning to echo human elixir decisions.*
+Every Clash Royale decision depends on the elixir, hand, battlefield, and opponent actions at that moment. Training from replays is not just a matter of reading which card a player used. The system must reconstruct the information available to one player at the decision boundary and align it with the corresponding action in time.
 
-## Project overview
+ElixirEcho turns full replays into auditable, two-player decision sequences and connects those sequences to recurrent imitation learning with FirstLight V4. This repository implements replay integration, semantic state and action contracts, trajectory storage, causal temporal state, V4 input adaptation, and training orchestration. The Native battle environment, V4 network, and core IL loss come from the external FirstLight project.
 
-ElixirEcho is a personal imitation-learning research project built around complete Clash Royale replay trajectories. Its focus is constructing fair, traceable sequential examples from full matches and connecting them to recurrent policies and imitation-learning training.
+![Animated semantic replay montage](docs/assets/trajectory-montage-3x3.gif)
 
-It is not an official Clash Royale project or a production-ready online bot. The project reuses FirstLight's Native runner, BattleEnv, V4 model, and training components where possible. ElixirEcho owns its semantic contracts, trajectory boundaries, public history, and integration code. FirstLight source, game assets, replay data, and model weights are not bundled here.
+## What it does
 
-## Core technical contributions
+- **Reconstructs replay decision points.** `capture` connects to a running FirstLight Native/BattleEnv service, samples both players every five game ticks, and builds the current Observation and ActionMask before the current action takes effect. The current capture path starts at tick 90 and pairs both actors under the same episode and tick identity. [Replay adapter](src/elixir_echo/integrations/firstlight/replay.py)
+- **Stores complete, verifiable matches.** Each `DecisionStep` pairs a player-view Observation, legal-action mask, and expert action under `(episode_id, tick, actor)`. `TrajectoryWriter` stages a complete episode, checks ordering, identity, and hashes, then commits it atomically. The training reader exposes only fields needed by the training path. [Decision record](src/elixir_echo/domain/trajectory.py) · [Trajectory and reader](src/elixir_echo/datasets/trajectory.py)
+- **Builds history in causal order.** `History` receives the current action only after the input for that decision has been formed. `PublicStateTracker` derives revealed cards and play history from public events observed so far. A prior action that the model input cannot represent stays unknown instead of being fabricated as WAIT. [History](src/elixir_echo/temporal/history.py) · [Tracker](src/elixir_echo/temporal/public_state.py)
+- **Compiles semantic state into V4 inputs.** `MIN` and `RICH` select different levels of Observation detail; the Tensorizer converts the selected state and temporal context into FirstLight V4 tensors. The stored world record and the features seen by the model remain separately inspectable. [Profiles](src/elixir_echo/profiles/observation.py) · [Tensorizer](src/elixir_echo/integrations/firstlight/tensorizer.py)
+- **Runs recurrent imitation learning by episode.** ElixirEcho's training orchestration carries LSTM state along each actor sequence, backpropagates in TBPTT chunks, updates with AdamW, and saves the model, optimizer, training progress, and data fingerprints. The first supervision pass supports WAIT and single `play_card` labels; unsupported ability, multi-action, and delay labels are not recast as WAIT. [Training entry point](src/elixir_echo/training/firstlight_run.py) · [Training orchestration](src/elixir_echo/integrations/firstlight/trainer.py)
 
-- Defines actor-fair `Observation`, `ActionMask`, `DecisionStep`, and complete-match `Trajectory` contracts, aligning current state, legal actions, and expert labels by episode/tick/actor.
-- Stores complete trajectories with atomic writes, per-record hashes, and an episode aggregate hash; the training reader does not expose episode decks or provider diagnostics.
-- Uses causal `History` and a deterministic `PublicStateTracker` for public events, revealed opponent cards, and previous actions; unknown facts remain unknown.
-- Provides `MIN` / `RICH` observation profiles and a FirstLight V4 adapter. Historical formal checkpoints use their compatible legacy input mode.
-- Reuses existing FirstLight V4 components for single-match capture, RICH input compilation, and training integration. G1 runtime smoke, G2 fixed-replay capture, G3 single-episode training, and G4 fresh-process restore passed. G2 used Native deployment resources already present on this host; a clean-machine installation or batch capture is not established.
+## From replay to checkpoint
 
-## Data-flow architecture
+1. **Read the replay and reconstruct the match.** FirstLight Native/BattleEnv rebuilds the match from replay commands. At each decision boundary, ElixirEcho obtains the current state and legal actions available to each actor.
+2. **Keep state and action labels separate.** `Observation` describes information available to the player at that moment, `ActionMask` describes legal choices, and `ExpertAction` records the replayed move. The label supervises the model; it is not fed back into that decision's input.
+3. **Write a complete Trajectory.** Records are aligned by episode, tick, and actor, then written only after ordering, completeness, and hash checks pass. The full sequence preserves match order and gives recurrent state an episode-level reset boundary.
+4. **Prepare temporal model input.** `TrainingTrajectoryReader` removes episode-level reconstruction data from the training projection. `History` and `PublicStateTracker` update context only from information available up to the current decision. The selected RICH profile and Tensorizer produce V4 tensors.
+5. **Train and save weights.** FirstLight V4 predicts actions. Its IL loss compares those predictions with expert labels; ElixirEcho applies TBPTT and AdamW updates and saves a resumable checkpoint after complete episodes.
+
+## Architecture
 
 ```mermaid
 flowchart LR
-  Replay[Replay record] --> Native[FirstLight Native / BattleEnv]
-  Native --> Capture[ElixirEcho capture adapter]
-  Capture --> Frame[Observation + ActionMask]
-  Frame --> Trajectory[Atomic full-episode Trajectory]
-  Trajectory --> Temporal[History + deterministic public Tracker]
-  Temporal --> Tensorizer[RICH V4 Tensorizer]
-  Tensorizer --> Policy[FirstLight V4 recurrent policy / IL loss]
-  Policy --> Checkpoint[Separate training and checkpoint integration]
+  subgraph Capture[Replay reconstruction]
+    direction TB
+    Replay[Replay] --> Native[FirstLight Native / BattleEnv]
+    Native --> State[Actor-fair Observation + ActionMask]
+    Replay --> Label[ExpertAction label]
+    State --> Step[DecisionStep]
+    Label --> Step
+    Step --> Store[Full-episode Trajectory]
+  end
+  subgraph Prepare[Temporal input]
+    direction TB
+    Reader[TrainingTrajectoryReader] --> Temporal[History + PublicStateTracker]
+    Temporal --> Tensorizer[ElixirEcho Tensorizer]
+  end
+  subgraph Train[Imitation learning]
+    direction TB
+    V4[FirstLight V4 + LSTM] --> Loss[FirstLight IL loss]
+    Loss --> Updates[TBPTT + AdamW]
+    Updates --> Checkpoint[Checkpoint + fingerprints]
+  end
+  Store --> Reader
+  Tensorizer --> V4
+  Reader -. expert-label supervision .-> Loss
 ```
 
-FirstLight supplies the Native runner, BattleEnv, V4 encoders, recurrent policy, action heads, and core IL loss. ElixirEcho calls these components through read-only adapters and supplies its own data contracts and training orchestration. The FirstLight checkout remains external and unchanged.
+## Design choices
 
-## Experimental results
+**A replay contains more than a player can observe.** Reconstruction may need both full decks and the complete event stream, but those facts should not automatically become one actor's model input. `TrainingTrajectoryReader` exposes only Observation, ActionMask, public event deltas, and action labels to the training path. The current action label enters the supervision path only.
 
-- **Formal checkpoint from the earlier research project:** its historical sealed-test evaluation covered 38 matches, 76 actor sequences, and 67,894 decision frames, with teacher-forced total IL loss 6.0717. This is an earlier-project result under its fingerprinted input contract, not an ElixirEcho retraining result or a win rate.
-- **G1 runtime acceptance:** the specified V4/IL/checkpoint smoke test passed in the isolated environment with the public raw FirstLight Provider and PyTorch 2.5.1+cu124 on an RTX 4070 Laptop (1 test, 14.63 seconds). This verifies a bounded runtime training/checkpoint path, not Native capture.
-- **G3/G4 single-episode training acceptance:** using the read-only archived fixed replay `86582cdb2f0f4e8c94e9d9540d75e4cb` (terminated, train split; dataset fingerprint `f95d10b96731134a93597e79548c202902886288fe53984182363ba6047f499b`), ElixirEcho trained on 1,406 actor records with RICH input for 44 optimizer updates in 6m 23s. A separate checkpoint was saved, then a fresh process restored the model, AdamW, and training progress and ran a finite forward pass on the same RICH input. Weight SHA-256: `925055abb124804dc901f200739bafcb41c42f1b98e68f53233c3a691ea41d80`. This is a complete single-match engineering run, not formal large-scale training or a model-quality evaluation.
-- **G2 isolated Native capture on this host: PASS (one replay).** The isolated ElixirEcho checkout reconstructed fixed replay `86582cdb2f0f4e8c94e9d9540d75e4cb` to `terminated`, producing 703 continuous decision ticks (90–3600, every five ticks) and 1,406 paired actor records. Trajectory verification, tick/actor alignment, and all 1,406 label-leakage assertions passed. The replay came from user-provided local IL_Replay data; the Provider was the original-source FirstLight checkout, while Native was started from an existing local deployment. This is not proof of a fresh-machine setup or reliable arbitrary/batch capture. There were 63 expert actions: 57 card plays and 6 abilities. Under the contract, 1,344 empty-action records mean WAIT; 62 non-WAIT records include one two-action window. All 57 card labels matched their hand-slot masks. One ability label at tick 830 has `execute_offset_ticks=+3` while that frame's ability mask is false; tick 833 was not sampled separately, so immediate legality for every ability action is not claimed. See [Demo/Results](docs/demo-results.md).
-- **Historical checkpoint prediction demo:** the checkpoint's `legacy_checkpoint` input mode was used for ordered inference over all 1,406 records. Twenty comparisons were emitted at 10 ticks × 2 actors. Every sampled model prediction was WAIT; 12 of 16 comparable WAIT/single-card labels matched, while four single-card labels were predicted as WAIT. Four ability/multi-action labels are outside this checkpoint's supported action-head comparison. This is a fixed-sample demonstration, not a win-rate or held-out metric.
+**History must follow decision causality.** The system forms the input using information available through tick `t`, then commits the action from `t` for later decisions. The tracker does not read future records or infer facts that the current input cannot establish. This preserves useful temporal context without leaking the current label.
 
-The fixed replay appears in the earlier Pilot20 `train` split. Its membership in the historical formal checkpoint's train/validation/test splits could not be confirmed by matching the same replay identity, so this comparison is **not described as held out**. The historical checkpoint and sealed data are not included in this repository.
+**Store semantic facts before choosing model features.** Observation is the auditable world record; MIN and RICH are field views; the Tensorizer decides how selected fields become model tensors. Adding a semantic field does not require making it a neural feature or changing the replay provider.
 
-See [Demo and Results](docs/demo-results.md) and the [model card](docs/model-card.md) for run details, checkpoint hashes, action comparisons, and limitations.
+## Run results
 
-## Demo
+| Work | Result |
+| --- | --- |
+| Fixed replay capture | One match sampled from tick 90 through 3600: **703 decision points and 1,406 paired-player records**. The replay reached `terminated`; trajectory checks and current-action leakage assertions passed. |
+| Full-episode training and restore | A separate run trained from the previously archived Trajectory for this replay and completed **44 optimizer updates**. A fresh process restored the model, AdamW, and training progress and ran a finite RICH forward pass. |
 
-This repository does not distribute a GIF derived from the real replay. See [Demo and Results](docs/demo-results.md) for verified prediction records, run metrics, and reproduction details.
+Capture and training were separate acceptance runs; training used the archived Trajectory rather than running immediately after capture. These results show that the engineering path works for a fixed sample. They do not establish large-scale training or gameplay strength. See [Demo and Results](docs/demo-results.md) for timings, checkpoint details, and limitations.
 
 ## Quick start
 
-The core package requires Python 3.12 or newer and [uv](https://docs.astral.sh/uv/).
+The base environment requires Python 3.12+ and [uv](https://docs.astral.sh/uv/):
 
 ```powershell
 uv sync --extra dev
-uv run pytest -q
 uv run elixir-echo --help
+uv run elixir-echo fixture --output ".\runs\fixture-demo"
 ```
 
-The base package has no runtime dependencies. Compatibility checks that require PyTorch, a FirstLight checkout, or a private replay cache skip when those resources are not configured. The FirstLight optimizer smoke runs only when `ELIXIR_ECHO_RUN_TRAINING_SMOKE=1` is explicitly set. Training commands print a plan by default and start only when `--run` is explicitly supplied with an episode cap.
-
-## Verify a local trajectory
-
-Point the command at an ElixirEcho Trajectory store root (the directory containing `episodes/`). It verifies episode and record hashes, ordering, identity, and full-match structure, then prints a summary through the training-safe reader.
+`fixture` uses a synthetic episode and a small fake policy to check the data and control path; it does not train a Clash Royale policy. Verify an existing Trajectory with:
 
 ```powershell
-uv run elixir-echo verify-trajectory "D:\path\to\trajectory-cache"
+uv run elixir-echo verify-trajectory "<trajectory-store>"
 ```
 
-The summary excludes episode context, full decks, provider diagnostics, and other audit-only metadata.
+Real capture also requires user-supplied IL_Replay Parquet data, a compatible FirstLight checkout, game assets, and a running Native service. `capture` runs preflight by default; add `--run` to connect and capture. `train-firstlight` prints a plan by default and executes only with `--run`. See [Reproducibility](docs/reproducibility.md) for the full setup and commands.
 
-## Capture one fixed replay
+## Dependencies, documentation, and limits
 
-Capture reuses the Native runner and the replay preparation, calibration, BattleEnv reset, and expert-command scheduling sequence already validated in the earlier research project. The Native service must already be running and reachable; this command does not launch MuMu.
+The base CLI requires Python 3.12+. The `firstlight-capture` extra provides PyArrow for Parquet input; training also requires a PyTorch/CUDA setup compatible with FirstLight and the host GPU. FirstLight is a separate checkout and is not installed by `uv sync`.
 
-Provide your own IL_Replay Parquet data, compatible FirstLight checkout, and Native game environment. First run the path preflight, which does not capture a replay:
+[Architecture](docs/architecture.md) · [Demo and Results](docs/demo-results.md) · [Model Card](docs/model-card.md) · [Reproducibility](docs/reproducibility.md) · [Migration Map](docs/provenance/migration-map.md) · [Third-party Notices](THIRD_PARTY_NOTICES.md)
 
-```powershell
-uv sync --extra dev --extra firstlight-capture
-uv run elixir-echo capture `
-  --replay-dataset "<local-IL_Replay-root>" `
-  --replay-tag "<exact-replay-tag>" `
-  --firstlight-root "<local-FirstLight-checkout>" `
-  --output "<new-trajectory-cache-root>"
-```
+FirstLight provides Native/BattleEnv, the V4 encoder and action heads, recurrent model, and core IL loss. ElixirEcho implements the contracts, full-episode Trajectory, temporal state, Tensorizer integration, and training orchestration in this repository. Semantic rules and temporal handling include code migrated and adapted from an earlier personal research project; the migration map records the boundaries. The upstream project is [FirstLight CR](https://github.com/Jaasssoooonnnnn/FirstLight_CR).
 
-The preflight should report `ready: true` and `not_checked` for Native reachability. Add `--run` to connect to Native and process the requested replay. A missing identity or upstream reconstruction failure does not trigger a substitute replay. A complete match captures both actors from tick 90 every five ticks until a trusted terminated/truncated outcome and verifies the episode before atomic commit. The output must be outside the input dataset and FirstLight checkout.
-
-On 2026-10-25, one fixed replay was captured from an isolated ElixirEcho checkout using Native deployment resources already present on this host. This does not establish that a new machine can launch Native from public source alone, nor that arbitrary replays will reconstruct successfully. Batch capture is unverified. With `--debug-train`, keep output under an isolated `runs/real-replay-chain/<run-id>` directory. Replay data, game assets, and Native setup are user-supplied and not distributed.
-
-## Capped training entry point
-
-The training command first verifies the trajectory store and fingerprints only the training-safe projection. The first pass selects only terminated full episodes in the `train` split; validation, test, and truncated episodes are excluded. Without `--run`, it only prints a plan and does not import FirstLight/PyTorch, create a model, or write checkpoints.
-
-```powershell
-uv run elixir-echo train-firstlight `
-  "D:\path\to\trajectory-cache" `
-  --firstlight-root "<local-FirstLight-checkout>" `
-  --checkpoint-directory "D:\path\to\elixirecho-checkpoints" `
-  --max-episodes 2
-```
-
-Add `--run` after reviewing the plan. To resume from a saved checkpoint, pass `--resume-from`; the dataset fingerprint and episode prefix are checked first. Use `--device cuda` only after confirming that the local PyTorch build supports the target GPU. This entry point reuses the external FirstLight V4 model and loss. It is a capped research entry point, not evidence of model quality.
-
-## Dependencies, provenance, and limitations
-
-- **Core:** Python 3.12+; `uv` installs development dependencies. The optional `firstlight-capture` extra installs a Parquet reader; `firstlight-cache` installs safetensors and zstandard. Install the PyTorch build required by the local FirstLight CPU/CUDA setup separately.
-- **FirstLight is external:** [FirstLight CR](https://github.com/Jaasssoooonnnnn/FirstLight_CR). Its source, weights, and game resources are not vendored here; check upstream code and asset terms before use or redistribution.
-- The historical formal checkpoint, sealed data, source IL_Replay data, and Native game resources are not included. The real-replay prediction script requires a compatible local checkpoint, trajectory, and FirstLight checkout.
-- Verified capabilities include the G1 runtime smoke, G2 capture of one fixed replay on this host, G3 training on one archived complete match for 44 updates, G4 fresh-process restore, historical-checkpoint loading compatibility, and a small teacher-forced prediction display. Clean-machine Native installation, batch production, multi-replay formal training, autonomous simulator play, and win rate are unverified. G3 is an engineering acceptance, not evidence of model quality; the historical checkpoint predicted only WAIT at the sampled points.
-- ElixirEcho-authored implementation code under `src/`, `tests/`, and `tools/` is licensed under Apache-2.0; see the root [LICENSE](LICENSE). This license covers only code the project owner is entitled to license. It does not grant rights to FirstLight, IL_Replay or replay-derived materials, model weights, or game/Native resources; see [Third-party Notices](THIRD_PARTY_NOTICES.md). This is not an official game tool and makes no production deployment or online-safety claim.
-
-See [CONTEXT.md](CONTEXT.md) for domain vocabulary and ownership boundaries, [architecture](docs/architecture.md) for system structure, and [`docs/provenance`](docs/provenance/) for source and migration records.
+Replay reconstruction success across arbitrary matches, batch capture, multi-match formal training, clean-machine Native setup, and gameplay performance remain unverified. FirstLight source, game assets, source replays, and model weights are not bundled. Apache-2.0 applies only to ElixirEcho code its owner is entitled to license; it does not extend to third-party assets or weights. See [LICENSE](LICENSE). This project is not affiliated with the game publisher.

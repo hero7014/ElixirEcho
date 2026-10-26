@@ -1,116 +1,99 @@
-# 圣水回响 | ElixirEcho
+# 圣水回响 · ElixirEcho
 
 [简体中文](README.md) · [English](README.en.md)
 
-*Learning to echo human elixir decisions.*
+《皇室战争》里的每一步都依赖当时的圣水、手牌、战场局势和对手行动。用对局回放训练模型时，难点不只是读出“玩家打了哪张牌”：还要还原决策发生时、站在某一方视角真正可用的信息，并把它与对应动作按时间顺序配对。
 
-## 项目简介
+ElixirEcho 将完整 Replay 转成可审计的双玩家决策序列，再把序列接入 FirstLight V4 的循环模仿学习训练。项目实现了回放接入、语义状态与动作契约、Trajectory 存储、因果历史状态、V4 输入适配和训练编排；Native 对局环境、V4 网络和核心 IL loss 来自外部 FirstLight。
 
-圣水回响（ElixirEcho）是一个以皇室战争回放为素材的个人模仿学习研究项目，重点是从完整对局中构造公平、可追溯的时序样本，并将其接入循环策略与模仿学习训练。
+![语义回放动态拼图](docs/assets/trajectory-montage-3x3.gif)
 
-它不是官方皇室战争项目，也不是可直接用于线上对战的机器人。项目尽量复用 FirstLight 的 Native、BattleEnv、V4 模型和训练组件；圣水回响负责自己的语义契约、轨迹边界、公开历史和接线代码。FirstLight 源码、游戏资源、回放数据和模型权重均未打包进本仓库。
+## 功能
 
-## 核心技术贡献
+- **从 Replay 重建决策时刻。** `capture` 连接已运行的 FirstLight Native/BattleEnv，按五个游戏 tick 采样双方状态，并在当前动作产生效果前构造 Observation 与 ActionMask。当前实现从 tick 90 开始，双玩家记录共享 episode 和 tick 身份。[采集适配器](src/elixir_echo/integrations/firstlight/replay.py)
+- **保存完整、可校验的对局。** 每个 `DecisionStep` 将玩家视角的 Observation、合法动作掩码和专家动作配在同一身份 `(episode_id, tick, actor)` 下。TrajectoryWriter 按完整 episode 暂存记录，检查顺序、身份和哈希后原子提交；训练 Reader 只暴露模型训练所需的字段。[决策记录](src/elixir_echo/domain/trajectory.py) · [Trajectory 与 Reader](src/elixir_echo/datasets/trajectory.py)
+- **按因果顺序处理历史。** `History` 在生成当前输入后才接收当前动作。`PublicStateTracker` 从截至当前时刻的公开事件恢复已揭示卡牌和出牌历史；上一动作无法由模型输入表示时明确标为 unknown，而不是伪造成 WAIT。[History](src/elixir_echo/temporal/history.py) · [Tracker](src/elixir_echo/temporal/public_state.py)
+- **从语义状态编译 V4 输入。** `MIN` 与 `RICH` 选择不同粒度的 Observation 字段，Tensorizer 再把所选状态和时间上下文整理为 FirstLight V4 所需的张量。完整记录和模型实际接收的特征因此是两个可分别审计的层次。[Profile](src/elixir_echo/profiles/observation.py) · [Tensorizer](src/elixir_echo/integrations/firstlight/tensorizer.py)
+- **按 episode 进行循环模仿学习。** ElixirEcho 的训练编排沿 actor 序列传递 LSTM 状态，以 TBPTT 分段反向传播，使用 AdamW 更新，并保存模型、优化器、训练进度与数据指纹。当前首轮监督范围是 WAIT 和单次 `play_card`；不支持的技能、多动作和 delay 标签不会被改写成 WAIT。[训练入口](src/elixir_echo/training/firstlight_run.py) · [训练编排](src/elixir_echo/integrations/firstlight/trainer.py)
 
-- 定义 actor-fair 的 `Observation`、`ActionMask`、`DecisionStep` 与完整对局 `Trajectory`，将当前状态、合法动作和专家标签按 episode/tick/actor 对齐。
-- 通过原子写入、逐记录哈希和 episode aggregate hash 保存完整轨迹；训练 reader 不暴露 episode deck 或 provider diagnostics。
-- 用因果 `History` 与确定性 `PublicStateTracker` 管理公开事件、对手已暴露卡牌和 previous action；未知信息保持 unknown。
-- 提供 `MIN` / `RICH` observation profiles 和 FirstLight V4 适配层；历史正式 checkpoint 使用其兼容输入模式。
-- 复用既有 FirstLight V4 组件完成真实单局采集、RICH 输入编译与训练接线；G1 运行时 smoke、G2 固定回放采集、G3 单局训练及 G4 新进程恢复均已通过。G2 使用本机已有的 Native 部署资源，不代表全新机器开箱安装或批量采集已验证。
+## 工作流程
 
-## 数据流架构
+1. **读取 Replay 并重建局面。** FirstLight Native/BattleEnv 根据回放命令重建对局。ElixirEcho 在每个决策边界分别取得两个 actor 可用的当前状态和合法动作集合。
+2. **分开保存状态与动作标签。** `Observation` 描述这一刻玩家能用的信息，`ActionMask` 描述可选动作，`ExpertAction` 记录回放中的专家操作。动作标签参与监督，但不会反向混入同一时刻的模型输入。
+3. **形成完整 Trajectory。** 记录以 episode/tick/actor 对齐，经过顺序、完整性和哈希校验后写入存储。完整序列保留了局内的先后关系，训练时也能按对局重置循环状态。
+4. **准备时序模型输入。** TrainingTrajectoryReader 去除训练不应读取的 episode 级重建信息；History 和 PublicStateTracker 仅基于当前及过去的可用信息更新上下文。Profile 与 Tensorizer 将语义记录转换为 RICH V4 张量。
+5. **训练并保存权重。** FirstLight V4 产生动作预测，FirstLight IL loss 根据专家标签计算监督信号，ElixirEcho 使用 TBPTT 和 AdamW 更新模型，并按完整 episode 保存可恢复的 checkpoint。
+
+## 技术架构
 
 ```mermaid
 flowchart LR
-  Replay[回放记录] --> Native[FirstLight Native / BattleEnv]
-  Native --> Capture[圣水回响采集适配层]
-  Capture --> Frame[Observation + ActionMask]
-  Frame --> Trajectory[原子完整对局 Trajectory]
-  Trajectory --> Temporal[History + 确定性公开 Tracker]
-  Temporal --> Tensorizer[RICH V4 Tensorizer]
-  Tensorizer --> Policy[FirstLight V4 循环策略 / IL loss]
-  Policy --> Checkpoint[独立训练与 checkpoint 接线]
+  subgraph Capture[Replay 重建与记录]
+    direction TB
+    Replay[Replay] --> Native[FirstLight Native / BattleEnv]
+    Native --> State[Actor-fair Observation + ActionMask]
+    Replay --> Label[ExpertAction 标签]
+    State --> Step[DecisionStep]
+    Label --> Step
+    Step --> Store[完整 Trajectory]
+  end
+  subgraph Prepare[时序输入]
+    direction TB
+    Reader[TrainingTrajectoryReader] --> Temporal[History + PublicStateTracker]
+    Temporal --> Tensorizer[ElixirEcho Tensorizer]
+  end
+  subgraph Train[模仿学习]
+    direction TB
+    V4[FirstLight V4 + LSTM] --> Loss[FirstLight IL loss]
+    Loss --> Updates[TBPTT + AdamW]
+    Updates --> Checkpoint[Checkpoint + fingerprints]
+  end
+  Store --> Reader
+  Tensorizer --> V4
+  Reader -. 专家标签监督 .-> Loss
 ```
 
-FirstLight 提供 Native runner、BattleEnv、V4 编码器、循环策略、动作头和核心 IL loss。圣水回响通过只读适配器调用这些能力，并实现自己的数据契约与训练编排。项目没有复制或修改 FirstLight 原目录。
+## 设计取舍
 
-## 实验与运行结果
+**Replay 知道的内容不等于玩家能看到的内容。** 重建对局可能需要读取双方完整牌组和完整事件，但这些重建信息不应自动成为某一方的模型输入。`TrainingTrajectoryReader` 只向训练链暴露 Observation、ActionMask、公开事件增量和动作标签；当前动作标签只进入监督路径。
 
-- **旧研究项目的正式 checkpoint**：历史封存测试覆盖 38 场、76 个 actor 序列、67,894 个决策帧；teacher-forced 总 IL loss 为 6.0717。这是旧项目在其指纹化输入契约上的评估，不是圣水回响重新训练的结果，也不是胜率。
-- **G1 运行时验收**：在隔离环境中使用公开 FirstLight 原始 Provider 和 PyTorch 2.5.1+cu124，RTX 4070 Laptop 上指定的 V4/IL/checkpoint smoke 测试通过（1 项，14.63 秒）。这验证了受控的运行时训练与 checkpoint 路径，不验证 Native 采集。
-- **G3/G4 单局训练验收**：使用只读归档的固定 replay `86582cdb2f0f4e8c94e9d9540d75e4cb`（terminated，train split，数据指纹 `f95d10b96731134a93597e79548c202902886288fe53984182363ba6047f499b`），完成 1,406 条 actor record 的 RICH 训练输入和 44 次 optimizer update，耗时 6 分 23 秒。隔离 checkpoint 保存后，在新进程中恢复模型、AdamW 与训练进度，并对同一 RICH 输入执行有限值 Forward。权重 SHA-256：`925055abb124804dc901f200739bafcb41c42f1b98e68f53233c3a691ea41d80`。这是一次完整单局工程训练验收，不是正式大规模训练或模型质量评估。
-- **G2 本机隔离 Native 采集：PASS（单场）**。在隔离 ElixirEcho checkout 中使用固定 replay `86582cdb2f0f4e8c94e9d9540d75e4cb`，重建至 `terminated`，得到 703 个连续 decision tick（90–3600，每 5 tick）和 1,406 条双 actor record。Trajectory 校验、逐 tick/actor 对齐及 1,406/1,406 标签泄漏断言通过。数据来自本机提供的原始 IL_Replay；FirstLight Provider 使用原始源码 checkout，Native 服务由本机已有部署环境启动。该结果不是全新机器开箱安装证明，也不证明任意 replay 或批量采集可靠。专家动作有 63 个：57 次出牌、6 次技能；1,344 条空动作记录按契约表示 WAIT，62 条非 WAIT 记录中有一个窗口包含两个动作。57/57 出牌标签符合对应 hand-slot mask。一个技能标签位于 tick 830、`execute_offset_ticks=+3`，该帧的技能 mask 为 false；未单独采样 tick 833 的执行瞬间，因此不声称全部技能动作在记录帧即时合法。详见 [Demo/Results](docs/demo-results.md)。
-- **旧正式 checkpoint 预测展示**：使用 checkpoint 的 `legacy_checkpoint` 输入兼容模式，对上述固定 replay 的 1,406 条记录顺序推理，在 10 个 tick × 2 个 actor 的 20 个采样点生成对照。样本中模型预测均为 WAIT；16 个 WAIT/单次出牌可比较标签中有 12 个一致，4 个单次出牌标签被预测为 WAIT；4 个技能/多动作标签不在该 checkpoint 的此动作头比较范围内。这只是固定样本展示，不是胜率或 held-out 指标。
+**History 必须按决策因果推进。** 先用截至 tick `t` 的状态构造输入，再把 tick `t` 的专家动作写入历史，供后续时刻使用。Tracker 不读未来记录，也不推断当前输入无法证明的事实。这个顺序让历史信息可用于循环策略，同时避免当前标签泄漏。
 
-固定 replay 出现在旧 Pilot20 的 `train` split。旧正式 checkpoint 的历史 train/validation/test 成员关系未能通过同一 replay identity 完整确认，因此本项目**不把这次对照称为 held-out 评估**。历史正式 checkpoint 与本地封存数据均不包含在仓库中。
+**先保存语义事实，再选择模型特征。** Observation 是可审计的世界描述，MIN/RICH 是字段视图，Tensorizer 才决定如何将所选字段编码为模型张量。增加一个语义字段不等于它必须直接成为网络特征，也不需要因此改变 replay Provider。
 
-详细运行数字、checkpoint 哈希、动作对照及局限见[演示与结果](docs/demo-results.md)和[模型卡](docs/model-card.md)。
+## 运行结果
 
-## Demo
+| 工作 | 实测结果 |
+| --- | --- |
+| 固定 Replay 采集 | 一场对局从 tick 90 采样至 tick 3600，共 **703 个决策时间点、1,406 条双玩家记录**；对局达到 `terminated`，Trajectory 与当前动作泄漏检查通过。 |
+| 完整单局训练与恢复 | 使用此前归档的该 Replay Trajectory，完成 **44 次 optimizer update**；新进程恢复模型、AdamW 和训练进度，并成功运行有限值 RICH Forward。 |
 
-本仓库不分发由真实 replay 派生的 GIF。已验证的逐帧预测记录、运行数字和复现条件见[演示与结果](docs/demo-results.md)。
+采集和训练是分别执行的两次验收；训练使用归档 Trajectory，并非紧接在这次采集命令之后运行。这些结果证明固定样本上的工程链路可运行，不代表大规模训练或模型实战水平。详细时间、checkpoint、限制和来源见[演示与结果](docs/demo-results.md)。
 
 ## 快速开始
 
-核心包要求 Python 3.12 或更新版本及 [uv](https://docs.astral.sh/uv/)。
+基础环境需要 Python 3.12+ 和 [uv](https://docs.astral.sh/uv/)：
 
 ```powershell
 uv sync --extra dev
-uv run pytest -q
 uv run elixir-echo --help
+uv run elixir-echo fixture --output ".\runs\fixture-demo"
 ```
 
-基础包没有运行时依赖。需要 PyTorch、FirstLight checkout 或私有回放缓存的兼容性检查会在对应资源未配置时跳过。FirstLight optimizer smoke 只有显式设置 `ELIXIR_ECHO_RUN_TRAINING_SMOKE=1` 才会运行。训练命令默认只生成计划；只有显式提供 `--run` 和 episode 上限才开始训练。
-
-## 本地轨迹验证
-
-将参数指向包含 `episodes/` 的圣水回响 Trajectory store 根目录。验证器检查 episode/record 哈希、顺序、identity 和完整对局结构，然后用训练安全 reader 输出摘要。
+`fixture` 使用合成 episode 和小型 fake policy 检查数据与控制路径，不训练皇室战争策略。校验已有 Trajectory：
 
 ```powershell
-uv run elixir-echo verify-trajectory "D:\path\to\trajectory-cache"
+uv run elixir-echo verify-trajectory "<trajectory-store>"
 ```
 
-摘要不会导出 episode context、完整卡组、provider diagnostics 或其他仅用于审计的元数据。
+真实采集还需要用户自行准备 IL_Replay Parquet、兼容的 FirstLight checkout、游戏资源及已运行的 Native 服务。`capture` 默认只做预检；加 `--run` 才连接 Native 并采集。`train-firstlight` 默认输出训练计划，需显式加 `--run` 才会执行训练。完整环境和命令见[复现说明](docs/reproducibility.md)。
 
-## 真实固定回放采集
+## 依赖、文档与限制
 
-采集复用 FirstLight Native runner，以及旧研究项目验证过的 replay 准备、校准、BattleEnv reset 和专家命令调度顺序。Native 服务必须已启动并可连接；命令本身不会启动 MuMu。
+基础 CLI 使用 Python 3.12+；`firstlight-capture` extra 提供读取 Parquet 所需的 PyArrow，训练环境还需按 FirstLight 与本机 GPU 配置 PyTorch/CUDA。FirstLight 是独立 checkout，不会由 `uv sync` 下载或安装。
 
-准备用户自己的 IL_Replay Parquet 数据、兼容的 FirstLight checkout 和 Native 游戏环境。先运行不采集的路径预检：
+[架构说明](docs/architecture.md) · [演示与结果](docs/demo-results.md) · [模型卡](docs/model-card.md) · [复现说明](docs/reproducibility.md) · [代码迁移记录](docs/provenance/migration-map.md) · [第三方声明](THIRD_PARTY_NOTICES.md)
 
-```powershell
-uv sync --extra dev --extra firstlight-capture
-uv run elixir-echo capture `
-  --replay-dataset "<local-IL_Replay-root>" `
-  --replay-tag "<exact-replay-tag>" `
-  --firstlight-root "<local-FirstLight-checkout>" `
-  --output "<new-trajectory-cache-root>"
-```
+FirstLight 提供 Native/BattleEnv、V4 编码器与动作头、循环模型和核心 IL loss；ElixirEcho 负责本仓库中的数据契约、完整 Trajectory、历史状态、Tensorizer 接线与训练编排。语义规则和时序处理包含从早期个人研究工程迁移并适配的实现，迁移表列出具体边界。上游为[FirstLight CR](https://github.com/Jaasssoooonnnnn/FirstLight_CR)。
 
-预检报告应显示 `ready: true`，并将 Native 可达性标为 `not_checked`。加上 `--run` 才会连接 Native 并处理指定 replay。identity 缺失或上游重建失败时不会替换成另一场。完整 episode 从 tick 90 起每 5 tick 同时采集两个 actor，直到可信的 terminated/truncated，并在原子提交前校验完整性。输出目录必须位于输入数据和 FirstLight checkout 之外。
-
-2026-10-25 已在隔离 ElixirEcho checkout 中完成一场固定 replay 的 G2 Native 采集。该次验收使用本机已存在的 FirstLight Native 部署资源；它不是全新机器仅凭公开源码即可启动 Native 的证明，也不能推断任意回放均可重建成功。批量采集仍未验证。使用 `--debug-train` 时，输出必须位于隔离的 `runs/real-replay-chain/<run-id>` 目录中。回放、游戏资源和 Native 均由使用者自行准备，不随仓库分发。
-
-## 受限训练入口
-
-训练命令先验证轨迹 store，并只从训练安全投影生成数据指纹。第一版仅选择 train split 中已 terminated 的完整 episode；validation、test 和 truncated episode 不进入训练。未提供 `--run` 时只打印计划，不导入 FirstLight/PyTorch、不创建模型、不写 checkpoint。
-
-```powershell
-uv run elixir-echo train-firstlight `
-  "D:\path\to\trajectory-cache" `
-  --firstlight-root "<local-FirstLight-checkout>" `
-  --checkpoint-directory "D:\path\to\elixirecho-checkpoints" `
-  --max-episodes 2
-```
-
-审阅计划后再附加 `--run`。从已保存 checkpoint 恢复时用 `--resume-from`，程序会先核对数据指纹与 episode 前缀。只有确认本机 PyTorch 支持目标 GPU 后才选择 `--device cuda`。该入口复用外部 FirstLight V4 模型和 loss，是有限额的研究入口，不代表模型质量。
-
-## 依赖、来源与局限
-
-- 核心：Python 3.12+；可用 `uv` 安装开发依赖。可选 `firstlight-capture` 安装 Parquet reader；`firstlight-cache` 安装 safetensors 与 zstandard。FirstLight 的 PyTorch/CUDA 环境需单独按本机配置准备。
-- FirstLight 是外部依赖：[FirstLight CR](https://github.com/Jaasssoooonnnnn/FirstLight_CR)。它的源码、权重和游戏资源没有 vendored 到本仓库；使用或再分发前应核实上游代码与资产许可。
-- 旧正式 checkpoint、封存数据、IL_Replay 原始数据和 Native 游戏资源未包含在仓库中。真实 replay 预测脚本需要本地提供兼容的 checkpoint、轨迹和 FirstLight checkout。
-- 已验证 G1 运行时 smoke、G2 一场本机隔离 Native 采集、G3 一场归档完整对局的 44 次更新、G4 新进程恢复，以及历史 checkpoint 的加载兼容和少量 teacher-forced 逐帧预测。全新机器 Native 安装、批量采集、多回放正式训练、自动化游戏实战和模型胜率尚未验证。G3 是单局工程验收，不代表模型质量；固定预测样本中模型只输出 WAIT。
-- ElixirEcho 自有实现代码（`src/`、`tests/`、`tools/`）采用 Apache-2.0，见根目录 [LICENSE](LICENSE)。许可仅覆盖项目所有者有权授权的代码，不涵盖 FirstLight、IL_Replay 或其衍生回放素材、模型权重、游戏与 Native 资源；详见 [第三方声明](THIRD_PARTY_NOTICES.md)。项目不是官方游戏工具，也不承诺线上部署安全性。
-
-概念和责任边界见 [CONTEXT.md](CONTEXT.md)，架构说明见[架构文档](docs/architecture.md)，来源与迁移记录见 [`docs/provenance`](docs/provenance/)。
+任意 Replay 的重建成功率、批量采集、多局正式训练、全新机器的 Native 部署和模型实战表现尚未验证。FirstLight 源码、游戏资源、原始 Replay 与模型权重不随本仓库分发。Apache-2.0 仅适用于项目所有者有权授权的 ElixirEcho 代码，不扩展到第三方素材或权重；见 [LICENSE](LICENSE)。本项目与游戏官方无隶属关系。

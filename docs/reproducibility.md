@@ -27,9 +27,11 @@ identity and selected data hashes are checked before any comparison.
 Training is explicit and capped. `train-firstlight` without `--run` reports
 the selected terminated train episodes and input fingerprint. With `--run`,
 it uses RICH, public temporal context, a FirstLight V4 recurrent policy, and
-imitation loss. Train, validation, and test are separated by whole replay.
-Ability, multi-action, delay, and value heads require their declared
-supervision masks; unsupported labels are never silently converted to WAIT.
+imitation loss. The input store must carry a frozen split assignment per complete replay;
+the runner checks those assignments and selects terminated train episodes.
+It does not create the split. Ability, multi-action, delay, and value heads
+require their declared supervision masks; unsupported labels are never silently
+converted to WAIT.
 
 The historical checkpoint must be evaluated with its fingerprinted legacy
 input mode. The current richer input mode is a separate experiment and cannot
