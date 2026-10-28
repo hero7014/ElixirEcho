@@ -1,8 +1,12 @@
 # Real replay training-chain demo
 
-The README's 3×3 GIF (`docs/assets/trajectory-montage-3x3.gif`) is a semantic
-state visualization, not game footage. Its action captions are expert labels,
-not model predictions or executed model actions.
+The README's 3×3 GIF (`docs/assets/trajectory-montage-3x3.gif`) is a
+semantic-state visualization built from a match in which the model autonomously
+made card-play decisions in the actual battle environment. Its action captions
+refer to the model's own decisions and actions, not expert labels overlaid on a
+teacher-forced replay. This match demo is separate from the historical fixed-
+replay prediction sample documented below: that sample is a read-only offline
+analysis using teacher-forced replay input and does not simulate a game.
 
 This note separates the earlier project's formal model, the earlier local
 single-replay debug run, and the isolated G1–G4 engineering acceptance. G2
