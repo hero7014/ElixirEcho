@@ -7,6 +7,7 @@ Every Clash Royale decision depends on the elixir, hand, battlefield, and oppone
 ElixirEcho turns full replays into auditable, two-player decision sequences and connects those sequences to recurrent imitation learning with FirstLight V4. This repository implements replay integration, semantic state and action contracts, trajectory storage, causal temporal state, V4 input adaptation, and training orchestration. The Native battle environment, V4 network, and core IL loss come from the external FirstLight project.
 
 ![Animated semantic replay montage](docs/assets/trajectory-montage-3x3.gif)
+
 This montage shows the model making decisions in real matches. Trained through imitation learning on **semantic trajectories reconstructed from 500 matches**, the model autonomously makes card-play decisions during actual gameplay.
 
 
@@ -67,11 +68,11 @@ flowchart LR
 
 | Work | Result |
 | --- | --- |
-| Fixed replay capture | One match sampled from tick 90 through tick 3600: **703 decision points and 1,406 paired-player records**. The replay reached `terminated`; trajectory checks and current-action leakage assertions passed. |
-| Formal recurrent imitation learning | Using semantic reconstruction data from **500 matches**, completed epoch 1 and validation: **4,473 optimizer updates**, 616 training actor sequences, and 72 validation actor sequences. Runtime was approximately **12 h 1 min 16 sec**, with **2.27 GB peak CUDA memory**. Training / validation total losses were **6.2641 / 6.0968**. |
-| Sealed test split evaluation | Read-only evaluation covered **38 matches, 76 actor sequences, and 67,894 decision frames**, with teacher-forced total IL loss of **6.0717**. |
+| Fixed replay capture | One match sampled from tick 90 through 3600: **703 decision points and 1,406 paired-player records**. The replay reached `terminated`; trajectory checks and current-action leakage assertions passed. |
+| Formal recurrent imitation-learning training | Using semantic-reconstruction data from **500 matches**, the first full epoch and validation completed: **4,473 optimizer updates**, 616 training actor sequences, and 72 validation actor sequences. Elapsed time was about **12 h 1 min 16 sec**, with about **2.27 GB** peak CUDA memory. Training / validation total loss was **6.2641 / 6.0968**. |
+| Sealed test-split evaluation | Read-only evaluation covered **38 matches, 76 actor sequences, and 67,894 decision frames**, with a teacher-forced total IL loss of **6.0717**. |
 
-Formal training and sealed test split evaluation are results of the full pipeline using semantic reconstruction data from 500 matches. Test IL loss is not a substitute for action quality, win rate, or gameplay stability. See [Demo and Results](docs/demo-results.md) for timing, checkpoint details, evaluation scope, and limitations.
+Formal training and sealed test-split evaluation are results from the workflow based on semantic-reconstruction data from 500 matches. Test-split IL loss does not replace evaluation of action quality, win rate, or gameplay stability. See [Demo and Results](docs/demo-results.md) and [Model Card](docs/model-card.md) for timings, checkpoint details, evaluation scope, and limitations.
 
 ## Quick start
 
@@ -99,4 +100,8 @@ The base CLI requires Python 3.12+. The `firstlight-capture` extra provides PyAr
 
 FirstLight provides Native/BattleEnv, the V4 encoder and action heads, recurrent model, and core IL loss. ElixirEcho implements the contracts, full-episode Trajectory, temporal state, Tensorizer integration, and training orchestration in this repository. Semantic rules and temporal handling include code migrated and adapted from an earlier personal research project; the migration map records the boundaries. The upstream project is [FirstLight CR](https://github.com/Jaasssoooonnnnn/FirstLight_CR).
 
-Batch capture of arbitrary replays, training at 10,000+ match scale, Native deployment on a clean machine, and gameplay performance have not been validated. The model trained on semantic reconstruction data from 500 matches can autonomously make card-play decisions in actual matches, but policy stability, cross-scenario performance, and win rate still require systematic evaluation. FirstLight source, game assets, source replays, and model weights are not distributed in this repository. Apache-2.0 applies only to ElixirEcho code that the project owner is entitled to license; it does not extend to third-party assets or weights. See [LICENSE](LICENSE). This project is not affiliated with the game publisher.
+Batch capture of arbitrary replays, training at 10,000+ match scale, and Native deployment on a clean machine have not been validated. The model has made autonomous card-play decisions in actual matches, but policy quality, cross-scenario robustness, and win rate still require systematic evaluation.
+
+Checkpoint V1's formal training and sealed test split evaluation were completed in the earlier research project. The single-episode training acceptance in this repository ran 44 optimizer updates to validate the training and restore path; it is not a rerun of the historical formal training and does not establish model quality.
+
+FirstLight source, game assets, source replays, and model weights are not distributed in this repository. Apache-2.0 applies only to ElixirEcho code that the project owner is entitled to license; it does not extend to third-party assets or weights. See [LICENSE](LICENSE). This project is not affiliated with the game publisher.
