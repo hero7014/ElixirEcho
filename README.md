@@ -7,7 +7,8 @@
 ElixirEcho 将完整 Replay 转成可审计的双玩家决策序列，再把序列接入 FirstLight V4 的循环模仿学习训练。项目实现了回放接入、语义状态与动作契约、Trajectory 存储、因果历史状态、V4 输入适配和训练编排；Native 对局环境、V4 网络和核心 IL loss 来自外部 FirstLight。
 
 ![语义回放动态拼图](docs/assets/trajectory-montage-3x3.gif)
-这是模型在真实对战环境中的决策表现语义状态可视化。模型基于 **500 场对局的语义重建数据**完成了完整的正式模仿学习训练（Checkpoint V1），并在实战中自主进行出牌决策。
+
+这是模型在真实对局中自主出牌过程的语义状态可视化。模型基于 **500 场对局的语义重建数据**完成了完整的正式模仿学习训练（Checkpoint V1），并在实战中自主进行出牌决策。
 
 
 ## 功能
@@ -71,7 +72,7 @@ flowchart LR
 | 正式循环模仿学习训练 | 基于 **500 场对局的语义重建数据**，完整完成第 1 个 epoch 和验证：**4,473 次 optimizer update**、616 条训练 actor 序列、72 条验证 actor 序列；耗时约 **12 小时 1 分 16 秒**，峰值 CUDA 显存约 **2.27 GB**。训练 / 验证 total loss 分别为 **6.2641 / 6.0968**。 |
 | Sealed test split 评估 | 只读评估覆盖 **38 场对局、76 条 actor 序列、67,894 个决策帧**，teacher-forced total IL loss 为 **6.0717**。 |
 
-正式训练与 sealed test split 评估是基于 500 场语义重建数据的完整流程结果。测试集 IL loss 不能替代动作质量、胜率或实战稳定性评估。详细时间、checkpoint、评估范围和限制见[演示与结果](docs/demo-results.md)
+正式训练与 sealed test split 评估是基于 500 场语义重建数据的完整流程结果。测试集 IL loss 不能替代动作质量、胜率或实战稳定性评估。详细时间、checkpoint、评估范围和限制见[演示与结果](docs/demo-results.md)与[模型卡](docs/model-card.md)。
 
 ## 快速开始
 
@@ -99,4 +100,8 @@ uv run elixir-echo verify-trajectory "<trajectory-store>"
 
 FirstLight 提供 Native/BattleEnv、V4 编码器与动作头、循环模型和核心 IL loss；ElixirEcho 负责本仓库中的数据契约、完整 Trajectory、历史状态、Tensorizer 接线与训练编排。语义规则和时序处理包含从早期个人研究工程迁移并适配的实现，迁移表列出具体边界。上游为[FirstLight CR](https://github.com/Jaasssoooonnnnn/FirstLight_CR)。
 
-任意 Replay 的批量采集、万场级以上大规模训练、全新机器的 Native 部署和模型实战表现尚未验证。模型基于 500 场数据已能够在实际对局流程中自主进行出牌决策，但稳定策略质量、跨场景表现和实际胜率仍需进一步系统评估。FirstLight 源码、游戏资源、原始 Replay 与模型权重不随本仓库分发。Apache-2.0 仅适用于项目所有者有权授权的 ElixirEcho 代码，不扩展到第三方素材或权重；见 [LICENSE](LICENSE)。本项目与游戏官方无隶属关系。
+任意 Replay 的批量采集、万场级以上大规模训练，以及全新机器上的 Native 部署尚未验证。模型已在实际对局流程中自主出牌，但策略质量、跨场景稳健性和实际胜率仍需系统评估。
+
+Checkpoint V1 的正式训练与 sealed test split 只读评估来自此前研究工程。本仓库中的单对局训练验收仅完成 44 次 optimizer update，用于验证训练与恢复链路，不代表新一轮正式训练或模型质量结论。
+
+FirstLight 源码、游戏资源、原始 Replay 与模型权重不随本仓库分发。Apache-2.0 仅适用于项目所有者有权授权的 ElixirEcho 代码，不扩展到第三方素材或权重；见 [LICENSE](LICENSE)。本项目与游戏官方无隶属关系。
