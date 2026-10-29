@@ -30,10 +30,10 @@ An earlier locally configured environment completed one real Native
 reconstruction and a two-update debug run. G1 runtime smoke, G2 single-replay
 Native capture, and G3/G4 single-episode training/reload acceptance have now
 passed in the isolated ElixirEcho environment. G3 used an already archived,
-read-only Trajectory. For G2, the Provider was the original-source checkout at
-`D:\FirstLight_CR-main`; the Native service was started through the existing
-deployment at `D:\Downloads\FirstLight_CR-main`, which supplied its built
-runtime resources and local compatibility. This hybrid local setup is not a
+read-only Trajectory. For G2, the Provider was imported from the original
+FirstLight source checkout, while the Native service was started from a
+separate pre-existing local deployment that supplied its built runtime
+resources and compatibility layer. This hybrid local setup is not a
 fresh-machine installation test and does not establish arbitrary-replay or
 batch reliability. The V4 backbone, recurrent model, and core imitation-loss
 implementation are external FirstLight components; ElixirEcho has not rebuilt
@@ -43,7 +43,8 @@ them.
 
 | Responsibility | Earlier implementation or external source | ElixirEcho implementation | Migration and verification boundary |
 | --- | --- | --- | --- |
-| Replay selection and Native calibration | Earlier `semantic_frame.firstlight_replay_smoke` and `semantic_frame.firstlight_full_episode`; external FirstLight `NativeClashEnv` and `BattleEnvV1` | `integrations.firstlight.capture` | The source preflight rule and preparation, calibration, reset, and expert-command scheduling order were ported and adapted to a one-replay CLI. Native and BattleEnv are imported from the configured external checkout. G2 captured fixed replay `86582cdb2f0f4e8c94e9d9540d75e4cb` in the isolated ElixirEcho checkout through trusted termination: 703 five-tick decision steps, 1,406 records, and 1,406/1,406 label-leakage assertions passed. The original-source Provider was `D:\FirstLight_CR-main`; Native was launched through the existing deployed environment `D:\Downloads\FirstLight_CR-main`. This does not prove raw-source Native deployment on a clean machine, arbitrary replay acceptance, or batch reliability. A prior read-only preflight had been blocked before the raw Parquet and Native environment were made available. |
+| Replay selection and Native calibration | Earlier `semantic_frame.firstlight_replay_smoke` and `semantic_frame.firstlight_full_episode`; external FirstLight `NativeClashEnv` and `BattleEnvV1` | `integrations.firstlight.capture` | The source preflight rule and preparation, calibration, reset, and expert-command scheduling order were ported and adapted to a one-replay CLI. Native and BattleEnv are imported from the configured external checkout. G2 captured fixed replay `86582cdb2f0f4e8c94e9d9540d75e4cb` in the isolated ElixirEcho checkout through trusted termination: 703 five-tick decision steps, 1,406 records, and 1,406/1,406 label-leakage assertions passed. The original-source Provider was imported from the raw FirstLight checkout;
+Native was launched through a separate pre-existing local deployment with its built runtime resources. This does not prove raw-source Native deployment on a clean machine, arbitrary replay acceptance, or batch reliability. A prior read-only preflight had been blocked before the raw Parquet and Native environment were made available. |
 | Paired actor decision timeline | Earlier `firstlight_full_episode.group_timed_expert_actions` and `capture_decision_timeline` | `integrations.firstlight.replay` | Five-tick, two-actor timing and the label-leakage boundary were migrated into the new trajectory contract. No separate game engine was built. |
 | Actor-fair semantic input | Earlier `semantic_frame.contracts`, `firstlight_adapter`, and `profiles` | `domain.observation`, `integrations.firstlight.observation`, and `profiles.observation` | Field rules and MIN/RICH selection were migrated with contract and naming adaptations. Semantic parity tests cover selected legacy assets; they do not prove equivalence for every game mechanism. |
 | Tensorizer and temporal V4 input | Earlier `training.tensorizer_v1` and `training.temporal_v4_input` | `integrations.firstlight.tensorizer` | **Substantial input assembly was rewritten** for ElixirEcho contracts. `legacy_checkpoint` preserves the historical input mode; representative tensor and checkpoint compatibility tests compare against the earlier implementation and sealed cache. The richer mode is a separate input contract. |
